@@ -31,7 +31,9 @@
   main{max-width:600px;margin:0 auto;padding:0 14px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px;animation:pop .25s ease both;box-shadow:0 6px 20px rgba(10,37,64,.06)}
   @keyframes pop{0%{transform:translateY(8px);opacity:0}100%{transform:none;opacity:1}}
-  @media(prefers-reduced-motion:reduce){.card{animation:none}}
+  @keyframes slideIn{0%{transform:translateX(12px);opacity:0}100%{transform:none;opacity:1}}
+  main.swap{animation:slideIn .22s ease both}
+  @media(prefers-reduced-motion:reduce){.card,main.swap{animation:none}}
   h2{font-size:20px;font-weight:800;letter-spacing:-.3px;color:#fff}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .btnP{background:var(--emerald);color:#fff;border:none;border-radius:14px;padding:14px 18px;font-size:15px;font-weight:700;min-height:50px}
@@ -102,7 +104,7 @@
 const MESES=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const CATEGORIAS=["Moradia","Mercado","Restaurante","Transporte","Saúde","Educação","Lazer","Vestuário","Assinaturas","Contas","Impostos","Outros"];
 const NAT_LABEL={ordinaria:"Ordinária (mensal fixa)",estimada:"Estimada (a confirmar)",eventual:"Eventual (mês específico)",parcela:"Parcela do cartão"};
-const NAT_COR={ordinaria:"#334155",estimada:"#065F46",eventual:"#1E3A8A",parcela:"#FA8072"};
+const NAT_COR={ordinaria:"#0A2540",estimada:"#639FAB",eventual:"#004B49",parcela:"#FF6584"};
 const fmt=n=>(n<0?"-":"")+"R$ "+Math.abs(Math.round(n)).toLocaleString("pt-BR");
 const provavel=it=>it.natureza==="estimada"?(((+it.min||0)+(+it.max||0))/2):(+it.valor||0);
 const escapeAttr=s=>String(s==null?"":s).replace(/"/g,"&quot;").replace(/</g,"&lt;");
@@ -116,10 +118,10 @@ const FUNCAO_URL_PADRAO = "";
 // ====================================================================
 
 // ---------- estado ----------
-let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],historico:[],pagosMes:{},mesRef:""};
+let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],historico:[],pagosMes:{},mesRef:"",incentivos:[]};
 let cfg={firebase:null,funcaoUrl:""};
 let tab="inicio", modoAdd="texto", filtroDesp="todos";
-let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null;
+let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null, mesDetalhe=null, incEdit=null;
 let fb={app:null,db:null,auth:null,uid:null,ref:null,unsub:null};
 
 const seed=[
@@ -236,6 +238,69 @@ function gastoDoMes(i){
   }
   return {fixo,estimado,eventual,parcela,total:fixo+estimado+eventual+parcela};
 }
+// itens ativos num mês i (com valor projetado), para a tela de detalhe
+function itensDoMes(i){
+  const out=[];
+  for(const it of state.itens){
+    let v=0, ativo=false;
+    if(it.natureza==="ordinaria"){ v=+it.valor||0; ativo=true; }
+    else if(it.natureza==="estimada"){ v=provavel(it); ativo=true; }
+    else if(it.natureza==="eventual"){ if((+it.mesIdx||0)===i){ v=+it.valor||0; ativo=true; } }
+    else if(it.natureza==="parcela"){ if(i<(+it.restam||0)){ v=+it.valor||0; ativo=true; } }
+    if(ativo) out.push({...it, _v:v, _totalParc: it.natureza==="parcela"?Math.max(Math.round((+it.total)/(+it.valor||1)),+it.restam||1):null, _parcelaNum: it.natureza==="parcela"?(Math.max(Math.round((+it.total)/(+it.valor||1)),+it.restam||1)-(+it.restam||0)+i+1):null});
+  }
+  return out.sort((a,b)=>b._v-a._v);
+}
+
+// ===== MOTOR DE ANÁLISE (determinístico, funciona sem IA) =====
+const Analise={
+  // gasto mensal médio por categoria (considerando o mês corrente)
+  porCategoria(){
+    const map={};
+    for(const it of itensDoMes(0)){ map[it.cat]=(map[it.cat]||0)+it._v; }
+    return Object.entries(map).map(([cat,v])=>({cat,v})).sort((a,b)=>b.v-a.v);
+  },
+  // principais despesas dos próximos N meses, opcionalmente filtrando por categoria
+  principaisProximos(nMeses, categoria){
+    const acc={};
+    for(let i=0;i<nMeses;i++){
+      for(const it of itensDoMes(i)){
+        if(categoria && it.cat!==categoria) continue;
+        acc[it.nome]=acc[it.nome]||{nome:it.nome,cat:it.cat,total:0,nat:it.natureza};
+        acc[it.nome].total+=it._v;
+      }
+    }
+    return Object.values(acc).sort((a,b)=>b.total-a.total);
+  },
+  // simula antecipar K parcelas de um parcelamento: quanto sai do caixa agora e quanto alivia à frente
+  anteciparParcela(itemId, k){
+    const it=state.itens.find(x=>x.id===itemId); if(!it||it.natureza!=="parcela") return null;
+    const restam=+it.restam||0, valor=+it.valor||0;
+    const kReal=Math.min(k,restam);
+    const desembolsoAgora=kReal*valor;
+    const novoRestam=restam-kReal;
+    // alívio: nos próximos kReal meses, a parcela deixa de existir mais cedo
+    return {nome:it.nome, valor, restam, kReal, desembolsoAgora, novoRestam,
+      mesesAliviados:kReal, economiaJuros:null};
+  },
+  // total comprometido em parcelas e quando "desincha"
+  evolucaoParcelas(){
+    const p=projecao();
+    return p.map(x=>({mes:x.mes, ano:x.ano, parcela:x.parcela}));
+  },
+  // resumo compacto dos dados para enviar à IA
+  resumoParaIA(){
+    const cat=this.porCategoria();
+    const p=projecao();
+    return {
+      renda:state.renda, metaPct:state.metaPct, horizonte:state.horizonte,
+      gastoMesAtual:p[0].total, saldoMesAtual:p[0].sobra,
+      porCategoria:cat,
+      projecao:p.map(x=>({mes:x.mes+"/"+x.ano, gasto:Math.round(x.total), saldo:Math.round(x.sobra), parcelas:Math.round(x.parcela)})),
+      parcelamentos:state.itens.filter(i=>i.natureza==="parcela").map(i=>({nome:i.nome,valor:i.valor,faltam:i.restam,cat:i.cat})),
+    };
+  }
+};
 function projecao(){
   const now=new Date(),out=[];
   for(let i=0;i<state.horizonte;i++){
@@ -402,8 +467,7 @@ function cardGraficoHome(p12, esc){
 }
 
 // ---------- itens ----------
-function lancar(item){ item.id=item.natureza[0]+Date.now()+Math.floor(Math.random()*99); state.itens=[...state.itens,item]; salvar(); }
-function atualizar(id,patch){ state.itens=state.itens.map(x=>x.id===id?{...x,...patch}:x); salvar(); }
+function lancar(item){ item.id=item.natureza[0]+Date.now()+Math.floor(Math.random()*99); state.itens=[...state.itens,item]; salvar(); }function atualizar(id,patch){ state.itens=state.itens.map(x=>x.id===id?{...x,...patch}:x); salvar(); }
 function excluir(id){ if(!confirm("Excluir esta despesa?")) return; state.itens=state.itens.filter(x=>x.id!==id); salvar(); render(); }
 
 // ---------- pagamentos e fechamento mensal ----------
@@ -470,8 +534,11 @@ function render(){
   const sync=fb.ref?" · sincronizado":"";
   document.getElementById("hsub").textContent=`gestão familiar · ${state.horizonte} meses${sync}`;
   renderNav();
+  app.classList.remove("swap"); void app.offsetWidth; app.classList.add("swap");
   if(tab==="inicio") app.innerHTML=viewInicio();
   else if(tab==="proj") app.innerHTML=viewProj();
+  else if(tab==="detalheMes") app.innerHTML=viewDetalheMes();
+  else if(tab==="incentivo") app.innerHTML=viewIncentivo();
   else if(tab==="despesas"){ app.innerHTML=viewDespesas(); if(editandoId){ const b=document.getElementById("ed-"+editandoId); if(b){ b.classList.remove("hidden"); renderEdicao(editandoId); } } }
   else if(tab==="metas") app.innerHTML=viewMetas();
   else if(tab==="add"){ app.innerHTML=viewAdd(); ligarAdd(); }
@@ -481,7 +548,8 @@ function render(){
 function renderNav(){
   const items=[["inicio","⌂","Início"],["proj","◔","Projeção"],["despesas","▤","Despesas"],["metas","◎","Metas"],["add","+","Adicionar"],["saiba","?","Saiba+"]];
   document.getElementById("nav").innerHTML=items.map(([k,ic,l])=>{
-    const cls=(k==="add"?"plus ":"")+(tab===k?"on":"");
+    const ativo = tab===k || (k==="proj"&&tab==="detalheMes");
+    const cls=(k==="add"?"plus ":"")+(ativo?"on":"");
     return `<button class="${cls.trim()}" onclick="_g.setTab('${k}')"><div class="ic">${ic}</div><div class="lb">${l}</div></button>`;
   }).join("");
 }
@@ -542,6 +610,8 @@ function viewInicio(){
       ${atalho("🎯","Metas",fechaMeta?"no alvo":"ajustar","metas","var(--emerald)")}
       ${atalho("⚙️","Configurar",semBackend?"ativar IA + sync":"conta / IA","config","var(--cyan)")}
     </div>
+    ${cardAgente()}
+    ${cardIncentivos()}
     ${semBackend?`<div style="font-size:12px;color:var(--cyan);text-align:center;padding:4px 10px 12px">💡 Texto e voz já funcionam. Para foto/PDF e sincronizar, toque em ⚙️ Configurar.</div>`:""}
   </div>`;
 }
@@ -614,8 +684,128 @@ function cardVisaoFuturo(p, esc){
     <div style="display:flex;margin-top:6px;font-size:9px;color:var(--cyan)">${lblMeses}</div>
   </div>`;
 }
+// ===== INCENTIVOS DIÁRIOS (eventos/viagens programados) =====
+// imagens temáticas (gradientes SVG inline — sem dependência externa) por tipo
+const TEMA_INCENTIVO={
+  viagem:{emoji:"✈️",g:["#0EA5E9","#0A2540"]},
+  praia:{emoji:"🏖️",g:["#06B6D4","#0E7490"]},
+  carro:{emoji:"🚗","g":["#475569","#0A2540"]},
+  casa:{emoji:"🏠",g:["#10B981","#004B49"]},
+  festa:{emoji:"🎉",g:["#FF6584","#7C2D49"]},
+  estudo:{emoji:"🎓",g:["#6366F1","#1E1B4B"]},
+  outro:{emoji:"⭐",g:["#00C49F","#004B49"]},
+};
+function ytId(url){ const m=(url||"").match(/(?:youtu\.be\/|v=|shorts\/)([\w-]{11})/); return m?m[1]:null; }
+function miniaturaIncentivo(inc){
+  const yt=ytId(inc.link);
+  if(yt) return `<img src="https://img.youtube.com/vi/${yt}/mqdefault.jpg" style="width:100%;height:100%;object-fit:cover" alt="">`;
+  if(inc.img) return `<img src="${inc.img}" style="width:100%;height:100%;object-fit:cover" alt="">`;
+  const t=TEMA_INCENTIVO[inc.tema||"outro"]||TEMA_INCENTIVO.outro;
+  return `<div style="width:100%;height:100%;background:linear-gradient(135deg,${t.g[0]},${t.g[1]});display:flex;align-items:center;justify-content:center;font-size:34px">${t.emoji}</div>`;
+}
+function cardIncentivos(){
+  const list=(state.incentivos||[]).slice().sort((a,b)=>(a.data||"")<(b.data||"")?-1:1);
+  const novo=`<button onclick="_g.novoIncentivo()" style="flex:none;width:130px;background:rgba(255,255,255,.06);border:1.5px dashed rgba(255,255,255,.3);border-radius:14px;color:#fff;padding:0;height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">
+    <span style="font-size:26px;color:var(--gpink)">＋</span><span style="font-size:12px;font-weight:700">Adicionar<br>evento</span></button>`;
+  const cards=list.map(inc=>{
+    const yt=ytId(inc.link), temLink=!!inc.link;
+    return `<div style="flex:none;width:160px;border-radius:14px;overflow:hidden;background:#000;position:relative" onclick="_g.abrirIncentivo('${inc.id}')">
+      <div style="width:100%;height:96px;position:relative">${miniaturaIncentivo(inc)}
+        ${temLink?`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><span style="width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px">▶</span></div>`:""}
+        ${inc.data?`<div style="position:absolute;top:6px;left:6px;background:rgba(0,0,0,.6);color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:8px">${fmtDataCurta(inc.data)}</div>`:""}
+      </div>
+      <div style="padding:8px 10px 10px;background:linear-gradient(180deg,rgba(10,37,64,.0),#0A2540 60%)">
+        <div style="font-size:12px;font-weight:700;color:#fff;line-height:1.25">${inc.titulo||"Evento"}</div>
+        ${inc.valor?`<div style="font-size:11px;color:var(--ggreen);font-weight:700;margin-top:3px">meta ${fmt(inc.valor)}</div>`:""}
+      </div>
+    </div>`;
+  }).join("");
+  return `<div style="margin:4px 0 14px">
+    <div style="font-size:15px;font-weight:800;color:#fff;margin-bottom:10px;padding:0 2px">Incentivos · seus próximos planos</div>
+    <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px">${cards}${novo}</div>
+  </div>`;
+}
+function fmtDataCurta(d){ if(!d) return ""; const [a,m,dia]=d.split("-"); return `${dia}/${m}`; }
+G.novoIncentivo=()=>{ mesDetalhe=null; tab="incentivo"; incEdit=null; render(); window.scrollTo(0,0); };
+G.abrirIncentivo=id=>{ tab="incentivo"; incEdit=id; render(); window.scrollTo(0,0); };
+
 const miniRow=(l,v,c)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:3px;background:${c}"></span>${l}</span><span style="font-weight:700;color:${c}">${fmt(v)}</span></div>`;
 const atalho=(ic,l,s,t,c)=>`<button class="card" onclick="_g.setTab('${t}')" style="padding:16px 14px;text-align:left;display:block;width:100%"><div style="font-size:22px">${ic}</div><div style="font-size:14.5px;font-weight:700;color:${c};margin-top:6px">${l}</div><div style="font-size:11px;color:var(--mute)">${s}</div></button>`;
+
+// ===== AGENTE GUAVA =====
+let respostaAgente="";
+function cardAgente(){
+  const temIA=!!cfg.funcaoUrl;
+  const chips=[
+    ["📊 Gastos por categoria","cat"],
+    ["🍽️ Alimentação nos próx. 3 meses","alim3"],
+    ["💳 Quando as parcelas aliviam","parc"],
+    ["⏩ Simular antecipar parcelas","antec"],
+  ].map(([txt,q])=>`<button onclick="_g.perguntar('${q}')" style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 12px;border-radius:20px;white-space:nowrap">${txt}</button>`).join("");
+  return `<div class="card" style="background:var(--grad-dash);border:none;color:#fff">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <span style="font-size:20px">🤖</span>
+      <span style="font-size:15px;font-weight:800">Pergunte ao Guava</span>
+    </div>
+    <div style="font-size:11.5px;color:var(--cyan);margin-bottom:10px">Análises sobre seu orçamento${temIA?"":" · perguntas rápidas funcionam sem IA"}</div>
+    <div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:4px">${chips}</div>
+    <div style="display:flex;gap:7px;margin-top:10px">
+      <input id="agInput" placeholder="${temIA?'pergunte qualquer coisa...':'ative a IA p/ perguntas livres'}" ${temIA?'':'disabled'} style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;background:rgba(255,255,255,.92);color:var(--ink)">
+      <button onclick="_g.perguntarLivre()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;font-weight:700;padding:0 16px;border-radius:10px;font-size:14px;${temIA?'':'opacity:.5'}">▸</button>
+    </div>
+    <div id="agResp">${respostaAgente}</div>
+  </div>`;
+}
+function bolha(html){ return `<div style="margin-top:12px;background:rgba(255,255,255,.95);color:var(--ink);border-radius:14px;padding:13px 14px;font-size:13.5px;line-height:1.5">${html}</div>`; }
+G.perguntar=q=>{
+  let html="";
+  if(q==="cat"){
+    const cats=Analise.porCategoria();
+    const tot=cats.reduce((s,c)=>s+c.v,0)||1;
+    html=`<b>Seus gastos por categoria neste mês:</b>${cats.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px"><span>${c.cat}</span><span style="font-weight:700">${fmt(c.v)} <span style="color:var(--mute);font-size:11px">${Math.round(c.v/tot*100)}%</span></span></div><div style="height:5px;border-radius:3px;background:#eee;margin-top:3px;overflow:hidden"><div style="width:${c.v/tot*100}%;height:100%;background:var(--emerald)"></div></div>`).join("")}`;
+  } else if(q==="alim3"){
+    const r=[...Analise.principaisProximos(3,"Restaurante"),...Analise.principaisProximos(3,"Mercado")].sort((a,b)=>b.total-a.total);
+    const tot=r.reduce((s,x)=>s+x.total,0);
+    html=`<b>Alimentação (restaurantes + mercado) nos próximos 3 meses:</b><div style="margin:6px 0;font-size:12px;color:var(--mute)">Total estimado: <b style="color:var(--emerald)">${fmt(tot)}</b></div>${r.slice(0,6).map(x=>`<div style="display:flex;justify-content:space-between;margin-top:5px"><span>${x.nome} <span style="color:var(--mute);font-size:11px">${x.cat}</span></span><span style="font-weight:700">${fmt(x.total)}</span></div>`).join("")}`;
+  } else if(q==="parc"){
+    const ev=Analise.evolucaoParcelas();
+    const ini=ev[0].parcela, fim=ev[ev.length-1].parcela;
+    const marcos=ev.filter((_,i)=>i%3===0||i===ev.length-1);
+    html=`<b>Evolução do seu compromisso com parcelas:</b><div style="margin:6px 0;font-size:12.5px">Hoje: <b style="color:var(--gpink)">${fmt(ini)}/mês</b> → em ${ev.length} meses: <b style="color:var(--emerald)">${fmt(fim)}/mês</b></div>${marcos.map(m=>`<div style="display:flex;justify-content:space-between;margin-top:4px;font-size:12.5px"><span>${m.mes}/${String(m.ano).slice(2)}</span><span style="font-weight:700;color:var(--gpink)">${fmt(m.parcela)}</span></div>`).join("")}<div style="font-size:11.5px;color:var(--mute);margin-top:8px">💡 Cada parcelamento que termina libera espaço no orçamento.</div>`;
+  } else if(q==="antec"){
+    const parcelas=state.itens.filter(i=>i.natureza==="parcela").sort((a,b)=>(b.valor*b.restam)-(a.valor*a.restam)).slice(0,6);
+    html=`<b>Qual parcelamento você quer simular antecipar?</b><div style="font-size:12px;color:var(--mute);margin:4px 0 8px">Escolha um (mostro o desembolso e o alívio):</div>${parcelas.map(it=>`<button onclick="_g.simAntec('${it.id}')" style="display:flex;justify-content:space-between;width:100%;background:#F4F7F9;border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-top:6px;font-size:13px"><span>${it.nome}</span><span style="font-weight:700;color:var(--gpink)">${it.restam}x de ${fmt(it.valor)}</span></button>`).join("")}`;
+  }
+  respostaAgente=bolha(html);
+  const el=document.getElementById("agResp"); if(el) el.innerHTML=respostaAgente;
+};
+G.simAntec=id=>{
+  const it=state.itens.find(x=>x.id===id);
+  const opcoes=[3,6,10].filter(k=>k<=it.restam);
+  if(!opcoes.includes(it.restam)) opcoes.push(it.restam);
+  const linhas=opcoes.map(k=>{
+    const s=Analise.anteciparParcela(id,k);
+    return `<div style="border-top:1px solid var(--line);padding:9px 0"><div style="display:flex;justify-content:space-between"><span style="font-weight:700">Antecipar ${s.kReal}x ${s.kReal===it.restam?'(quitar)':''}</span><span style="font-weight:800;color:var(--gpink)">paga ${fmt(s.desembolsoAgora)} agora</span></div><div style="font-size:12px;color:var(--mute);margin-top:3px">restam ${s.restam} → ${s.novoRestam} parcelas · alivia ${fmt(s.valor)}/mês por ${s.mesesAliviados} ${s.mesesAliviados===1?'mês':'meses'}</div></div>`;
+  }).join("");
+  const html=`<b>Antecipar parcelas — ${it.nome}</b><div style="font-size:12px;color:var(--mute);margin:4px 0">Atual: ${it.restam}x de ${fmt(it.valor)} (faltam ${fmt(it.valor*it.restam)})</div>${linhas}<div style="font-size:11.5px;color:var(--mute);margin-top:8px">💡 Como esses parcelamentos do cartão são sem juros, antecipar não gera economia de juros — mas libera limite e tira o compromisso da frente. Avalie se o dinheiro à vista rende mais do que esse alívio.</div>`;
+  respostaAgente=bolha(html);
+  const el=document.getElementById("agResp"); if(el) el.innerHTML=respostaAgente;
+};
+G.perguntarLivre=async()=>{
+  const inp=document.getElementById("agInput"); const pergunta=(inp&&inp.value||"").trim();
+  if(!pergunta) return;
+  if(!cfg.funcaoUrl){ respostaAgente=bolha("Para perguntas livres, ative a IA em ⚙️ Configurar."); document.getElementById("agResp").innerHTML=respostaAgente; return; }
+  respostaAgente=bolha("<span style='color:var(--mute)'>analisando seus dados…</span>");
+  document.getElementById("agResp").innerHTML=respostaAgente;
+  try{
+    const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pergunta, dados:Analise.resumoParaIA()})});
+    const d=await r.json();
+    const txt=d.resposta||d.texto||JSON.stringify(d);
+    respostaAgente=bolha(txt.replace(/\n/g,"<br>"));
+  }catch(e){ respostaAgente=bolha("Não consegui consultar a IA agora. Tente as perguntas rápidas acima."); }
+  document.getElementById("agResp").innerHTML=respostaAgente;
+};
 
 // ---------- Projeção ----------
 function viewProj(){
@@ -623,10 +813,10 @@ function viewProj(){
   const estouro=p.filter(x=>x.total>state.renda).length, atencao=p.filter(x=>x.total>x.ideal).length;
   const aviso=estouro>0?`🛑 ${estouro} ${estouro===1?'mês ultrapassa':'meses ultrapassam'} a renda`
     :atencao>0?`${atencao} ${atencao===1?'mês fica':'meses ficam'} acima do ideal`:"todos os meses dentro do ideal 👏";
-  const barras=p.map(x=>{
+  const barras=p.map((x,bi)=>{
     const h=(x.total/maxV)*130, idealY=(x.ideal/maxV)*130, over=x.total>state.renda, tt=Math.max(x.total,1);
     const seg=(val,col,op=1)=>val>0?`<div style="height:${(val/tt)*100}%;background:${col};opacity:${op}"></div>`:"";
-    return `<div style="min-width:${state.horizonte===18?15:22}px;flex:1;display:flex;flex-direction:column;align-items:center">
+    return `<div onclick="_g.verMes(${bi})" style="min-width:${state.horizonte===18?15:22}px;flex:1;display:flex;flex-direction:column;align-items:center;cursor:pointer">
       <div style="width:100%;height:130px;position:relative;display:flex;align-items:flex-end">
         <div style="position:absolute;bottom:${idealY}px;left:0;right:0;height:1px;background:var(--green);opacity:.45"></div>
         <div style="width:100%;height:${h}px;border-radius:4px 4px 0 0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end">
@@ -636,8 +826,8 @@ function viewProj(){
       <div style="font-size:8.5px;color:var(--mute);margin-top:3px">${x.mes}</div>
     </div>`;
   }).join("");
-  const linhas=p.map((x,i)=>`<tr style="background:${i%2?'var(--bg)':'#fff'};border-bottom:1px solid var(--line)">
-    <td style="padding:10px 12px;font-size:13px;font-weight:600">${x.mes}/${String(x.ano).slice(2)}</td>
+  const linhas=p.map((x,i)=>`<tr onclick="_g.verMes(${i})" style="background:${i%2?'var(--bg)':'#fff'};border-bottom:1px solid var(--line);cursor:pointer">
+    <td style="padding:10px 12px;font-size:13px;font-weight:600">${x.mes}/${String(x.ano).slice(2)} <span style="color:var(--cyan);font-size:11px">›</span></td>
     <td style="padding:10px 12px;font-size:13px;text-align:right;color:${x.total>state.renda?'var(--guava)':x.total>x.ideal?'var(--graphite)':'var(--ink)'}">${fmt(x.total)}</td>
     <td style="padding:10px 12px;font-size:13px;text-align:right;color:var(--mute)">${fmt(x.ideal)}</td>
     <td style="padding:10px 12px;font-size:13px;text-align:right;font-weight:700;color:${x.sobra>=0?'var(--green)':'var(--guava)'}">${x.sobra>=0?'+':''}${fmt(x.sobra)}</td></tr>`).join("");
@@ -664,6 +854,94 @@ function viewProj(){
     </div>
   </div>`;
 }
+
+// ---------- Detalhe de um mês ----------
+function viewDetalheMes(){
+  const i=mesDetalhe||0;
+  const p=projecao(), x=p[i]; if(!x) return viewProj();
+  const itens=itensDoMes(i);
+  const grupos={ordinaria:[],estimada:[],eventual:[],parcela:[]};
+  itens.forEach(it=>grupos[it.natureza].push(it));
+  const sec=(nat,titulo,total)=>{
+    const arr=grupos[nat]; if(!arr.length) return "";
+    const linhas=arr.map(it=>{
+      const extra=it.natureza==="parcela"?` · parcela ${it._parcelaNum}/${it._totalParc}`:
+        it.natureza==="estimada"?` · ${fmt(+it.min||0)}–${fmt(+it.max||0)}`:"";
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)">
+        <div style="min-width:0"><div style="font-size:13.5px;font-weight:600">${it.nome}</div>
+        <div style="font-size:11px;color:var(--mute)">${it.cat}${extra}</div></div>
+        <div style="font-weight:700;font-size:13.5px;color:${NAT_COR[nat]}">${fmt(it._v)}</div></div>`;
+    }).join("");
+    return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+      <span style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><span style="width:9px;height:9px;border-radius:3px;background:${NAT_COR[nat]}"></span>${titulo}</span>
+      <span style="font-weight:800;color:${NAT_COR[nat]}">${fmt(total)}</span></div>${linhas}</div>`;
+  };
+  const over=x.total>state.renda;
+  return `<div style="padding-top:10px">
+    <button onclick="_g.voltarProj()" style="background:none;border:none;color:var(--cyan);font-size:14px;font-weight:700;padding:6px 0;display:flex;align-items:center;gap:5px">‹ voltar à projeção</button>
+    <div class="card" style="background:var(--grad-dash);border:none;color:#fff">
+      <div style="font-size:12px;color:var(--cyan);font-weight:700">${i===0?'ESTE MÊS':'DAQUI A '+i+(i===1?' MÊS':' MESES')}</div>
+      <div style="font-size:24px;font-weight:800;margin:2px 0 10px">${x.mes}/${x.ano}</div>
+      <div style="display:flex;gap:16px">
+        <div><div style="font-size:10.5px;color:var(--cyan)">Gasto previsto</div><div style="font-size:18px;font-weight:800;color:${over?'var(--gpink)':'#fff'}">${fmt(x.total)}</div></div>
+        <div><div style="font-size:10.5px;color:var(--cyan)">Saldo do mês</div><div style="font-size:18px;font-weight:800;color:${x.sobra>=0?'var(--ggreen)':'var(--gpink)'}">${x.sobra>=0?'+':''}${fmt(x.sobra)}</div></div>
+      </div>
+      ${over?`<div style="margin-top:10px;background:rgba(255,101,132,.2);border-radius:10px;padding:8px 10px;font-size:12px">⚠️ Neste mês os gastos ultrapassam a renda em ${fmt(-x.sobra)}. Veja abaixo o que mais pesa.</div>`:""}
+    </div>
+    ${sec("ordinaria","Fixas (ordinárias)",x.fixo)}
+    ${sec("estimada","Estimadas",x.estimado)}
+    ${sec("eventual","Eventuais deste mês",x.eventual)}
+    ${sec("parcela","Parcelas do cartão",x.parcela)}
+    ${x.parcela>0?`<div style="font-size:11.5px;color:var(--cyan);text-align:center;padding:2px 10px 10px">💡 As parcelas vão diminuindo conforme cada compra termina — veja a evolução voltando à projeção.</div>`:""}
+  </div>`;
+}
+G.verMes=i=>{ mesDetalhe=i; tab="detalheMes"; render(); window.scrollTo(0,0); };
+G.voltarProj=()=>{ tab="proj"; render(); window.scrollTo(0,0); };
+
+// ---------- Incentivo (evento/viagem programado) ----------
+function viewIncentivo(){
+  const ed=(state.incentivos||[]).find(x=>x.id===incEdit);
+  const v=ed||{titulo:"",data:"",valor:"",tema:"viagem",link:""};
+  const temas=Object.keys(TEMA_INCENTIVO);
+  return `<div style="padding-top:10px">
+    <button onclick="_g.fecharIncentivo()" style="background:none;border:none;color:var(--cyan);font-size:14px;font-weight:700;padding:6px 0">‹ voltar ao início</button>
+    <h2 style="margin:6px 0 12px">${ed?'Editar evento':'Novo evento / viagem'}</h2>
+    <div class="card">
+      <label class="fld">Título<input id="incTit" class="inp" value="${escapeAttr(v.titulo)}" placeholder="Ex: Viagem ao Japão"></label>
+      <div style="display:flex;gap:8px">
+        <label class="fld" style="flex:1">Data<input id="incData" class="inp" type="date" value="${v.data||''}"></label>
+        <label class="fld" style="flex:1">Meta R$ (opcional)<input id="incValor" class="inp" type="number" inputmode="numeric" value="${v.valor||''}" placeholder="0"></label>
+      </div>
+      <label class="fld" style="margin-top:4px">Tema (usado se não houver link)</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        ${temas.map(t=>`<button onclick="_g.setTemaInc('${t}')" data-tema="${t}" class="temaBtn" style="border:1.5px solid ${v.tema===t?'var(--emerald)':'var(--line)'};background:${v.tema===t?'var(--emerald)':'#fff'};color:${v.tema===t?'#fff':'var(--mute)'};border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700">${TEMA_INCENTIVO[t].emoji} ${t}</button>`).join("")}
+      </div>
+      <label class="fld">Link da foto/vídeo (opcional)<input id="incLink" class="inp" value="${escapeAttr(v.link||'')}" placeholder="cole link do YouTube, Fotos, Drive..."></label>
+      <div style="font-size:11px;color:var(--mute);margin-top:6px;line-height:1.4">💡 Cole um link do YouTube (mostra a capa do vídeo), ou de Google Fotos/Drive. Sem link, usamos uma capa temática. As mídias ficam na nuvem — não pesam no app.</div>
+      <button class="btnP" style="width:100%;margin-top:14px" onclick="_g.salvarIncentivo()">${ed?'Salvar':'Adicionar evento'}</button>
+      ${ed?`<button class="btnG" style="width:100%;margin-top:8px;color:var(--gpink);border-color:#F6D2CD" onclick="_g.excluirIncentivo('${ed.id}')">excluir evento</button>`:""}
+    </div>
+    ${(v.link||v.tema)?`<div class="card" style="padding:0;overflow:hidden"><div style="height:160px">${miniaturaIncentivo(v)}</div></div>`:""}
+  </div>`;
+}
+let incTemaTmp="viagem";
+G.setTemaInc=t=>{ incTemaTmp=t;
+  const ed=(state.incentivos||[]).find(x=>x.id===incEdit); if(ed) ed.tema=t; else incTemaTmp=t;
+  // atualização visual leve
+  document.querySelectorAll(".temaBtn").forEach(b=>{ const on=b.getAttribute("data-tema")===t;
+    b.style.background=on?"var(--emerald)":"#fff"; b.style.color=on?"#fff":"var(--mute)"; b.style.borderColor=on?"var(--emerald)":"var(--line)"; });
+};
+G.salvarIncentivo=()=>{
+  const g=id=>document.getElementById(id)?.value||"";
+  const ed=(state.incentivos||[]).find(x=>x.id===incEdit);
+  const obj={ titulo:g("incTit")||"Evento", data:g("incData"), valor:Number(g("incValor"))||0,
+    tema: ed?ed.tema:incTemaTmp, link:g("incLink").trim() };
+  state.incentivos=state.incentivos||[];
+  if(ed){ Object.assign(ed,obj); } else { obj.id="i"+Date.now(); state.incentivos.push(obj); }
+  salvar(); tab="inicio"; incEdit=null; render(); window.scrollTo(0,0);
+};
+G.excluirIncentivo=id=>{ if(!confirm("Excluir este evento?")) return; state.incentivos=(state.incentivos||[]).filter(x=>x.id!==id); salvar(); tab="inicio"; incEdit=null; render(); };
+G.fecharIncentivo=()=>{ tab="inicio"; incEdit=null; render(); window.scrollTo(0,0); };
 
 // ---------- Despesas ----------
 function viewDespesas(){
