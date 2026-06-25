@@ -670,6 +670,7 @@ G.campo=(id,key,val,num)=>{
 G.quitarParcela=id=>quitarParcela(id);
 G.togglePago=id=>togglePago(id);
 G.fecharMes=()=>fecharMes();
+G.excluir=id=>excluir(id);
 
 // ---------- Metas ----------
 function viewMetas(){
@@ -806,18 +807,18 @@ async function interpretar(payload){
 // parser local simples (sem IA) — cobre os formatos dos exemplos
 function parseLocal(texto){
   const out=[];
-  const partes=texto.split(/[;\n]+/).map(s=>s.trim()).filter(Boolean);
+  const partes=segmentar(texto);
   for(const parte of partes){
     const low=parte.toLowerCase();
     let m;
-    // parcelamento: "8x de 300" / "10x 280"
-    if((m=low.match(/(\d+)\s*x\s*(?:de\s*)?(\d[\d.,]*)/))){
+    // parcelamento: "8x de 300" / "10x 280" / "parcelei em 8 vezes de 300"
+    if((m=low.match(/(\d+)\s*(?:x|vezes?)\s*(?:de\s*)?(\d[\d.,]*)/))){
       const restam=parseInt(m[1],10), valor=num(m[2]);
-      out.push({nome:limpaNome(parte)||"Parcelamento",cat:"Outros",natureza:"parcela",valor,restam,total:valor*restam});
+      out.push({nome:limpaNome(parte)||"Parcelamento",cat:catGuess(low),natureza:"parcela",valor,restam,total:valor*restam});
       continue;
     }
-    // estimada: "entre 300 e 500"
-    if((m=low.match(/entre\s*(\d[\d.,]*)\s*e\s*(\d[\d.,]*)/))){
+    // estimada: "entre 300 e 500" / "de 300 a 500"
+    if((m=low.match(/(?:entre|de)\s*(\d[\d.,]*)\s*(?:e|a|até)\s*(\d[\d.,]*)/))){
       out.push({nome:limpaNome(parte)||"Despesa estimada",cat:catGuess(low),natureza:"estimada",min:num(m[1]),max:num(m[2])});
       continue;
     }
@@ -826,12 +827,28 @@ function parseLocal(texto){
       const mesIdx=mesParaIdx(m[2]);
       if(mesIdx!=null){ out.push({nome:limpaNome(parte)||"Despesa",cat:catGuess(low),natureza:"eventual",valor:num(m[1]),mesIdx}); continue; }
     }
-    // valor simples → ordinária
+    // valor simples → estimada se for conta variável, senão eventual (compra avulsa)
     if((m=low.match(/(\d[\d.,]+|\d+)/))){
-      out.push({nome:limpaNome(parte)||"Despesa",cat:catGuess(low),natureza:"ordinaria",valor:num(m[1])});
+      const v=num(m[1]);
+      const recorrente=/assinatura|mensalidade|aluguel|condom|plano|escola|netflix|spotify|seguro|internet|telefon/.test(low);
+      const nat=recorrente?"ordinaria":"eventual";
+      const item={nome:limpaNome(parte)||"Despesa",cat:catGuess(low),natureza:nat,valor:v};
+      if(nat==="eventual") item.mesIdx=0;
+      out.push(item);
     }
   }
   return out;
+}
+// segmenta uma fala em despesas distintas, protegendo "entre X e Y" e "Nx de Y"
+function segmentar(texto){
+  let t=texto;
+  // protege "entre X e Y" e "de X a Y" trocando o conector por placeholder
+  t=t.replace(/(entre\s*\d[\d.,]*)\s*(e|a|até)\s*(\d[\d.,]*)/gi,"$1<E>$3");
+  t=t.replace(/(\d+\s*(?:x|vezes?))\s*(de)\s*(\d)/gi,"$1<DE>$3");
+  // separadores de itens: ; / quebra de linha / vírgula / " e " / "também" / "mais"
+  let partes=t.split(/[;\n]+|,| e | também | tambem | mais /i);
+  // restaura placeholders
+  return partes.map(s=>s.replace(/<E>/g," e ").replace(/<DE>/g," de ").trim()).filter(Boolean);
 }
 function num(s){ s=String(s).replace(/\./g,"").replace(",","."); const n=parseFloat(s); return isNaN(n)?0:n; }
 function limpaNome(s){
@@ -866,20 +883,50 @@ function mesParaIdx(palavra){
 
 function mostrarResultado(itens){
   resultadoTmp=itens;
+  const natBtn=(i,nat,atual)=>`<button onclick="_g.setNat(${i},'${nat}')" style="flex:1;padding:7px 0;border-radius:8px;border:1.5px solid ${atual===nat?NAT_COR[nat]:'var(--line)'};background:${atual===nat?NAT_COR[nat]:'#fff'};color:${atual===nat?'#fff':'var(--mute)'};font-size:11px;font-weight:700">${NAT_LABEL[nat].split(" ")[0]}</button>`;
   const linhas=itens.map((it,i)=>{
-    const detalhe=`${it.cat||"Outros"} · ${NAT_LABEL[it.natureza]||it.natureza}`
-      +(it.natureza==="estimada"&&it.min!=null?` · ${fmt(+it.min)}–${fmt(+it.max)}`:"")
-      +(it.natureza==="parcela"?` · ${it.restam}x de ${fmt(+it.valor)}`:"")
-      +(it.natureza==="eventual"?` · ${MESES[(new Date().getMonth()+(+it.mesIdx||0))%12]}`:"");
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);gap:8px">
-      <div style="min-width:0"><div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:2px;background:${NAT_COR[it.natureza]||'var(--graphite)'};flex:none"></span>${it.nome||"Despesa"}</div>
-      <div style="font-size:11px;color:var(--mute);margin-left:13px">${detalhe}</div></div>
-      <button class="btnP" style="padding:9px 16px;font-size:13px;min-height:auto;flex:none" onclick="_g.incluir(${i})">incluir</button></div>`;
+    const nat=it.natureza||"eventual";
+    // campos específicos por natureza
+    let campos="";
+    if(nat==="estimada"){
+      campos=`<div style="display:flex;gap:6px;margin-top:6px">
+        ${campoMini(i,"min","Mín R$",it.min)}${campoMini(i,"max","Máx R$",it.max)}</div>`;
+    } else if(nat==="parcela"){
+      campos=`<div style="display:flex;gap:6px;margin-top:6px">
+        ${campoMini(i,"valor","Parcela R$",it.valor)}${campoMini(i,"restam","Faltam Nx",it.restam)}</div>`;
+    } else if(nat==="eventual"){
+      campos=`<div style="display:flex;gap:6px;margin-top:6px">
+        ${campoMini(i,"valor","Valor R$",it.valor)}${campoMini(i,"mesIdx","Daqui a (meses)",it.mesIdx||0)}</div>`;
+    } else { // ordinaria
+      campos=`<div style="display:flex;gap:6px;margin-top:6px">
+        ${campoMini(i,"valor","Valor mensal R$",it.valor)}</div>`;
+    }
+    return `<div style="padding:12px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <input value="${escapeAttr(it.nome||'Despesa')}" oninput="_g.setNome(${i},this.value)" style="flex:1;min-width:0;border:1.5px solid var(--line);border-radius:8px;padding:8px;font-size:14px;font-weight:600">
+        <button class="btnP" style="padding:9px 14px;font-size:13px;min-height:auto;flex:none" onclick="_g.incluir(${i})">incluir</button>
+      </div>
+      <div style="display:flex;gap:5px;margin-top:8px">${["ordinaria","estimada","eventual","parcela"].map(n=>natBtn(i,n,nat)).join("")}</div>
+      ${campos}
+      <select onchange="_g.setCat(${i},this.value)" style="width:100%;border:1.5px solid var(--line);border-radius:8px;padding:8px;font-size:13px;margin-top:6px">${CATEGORIAS.map(c=>`<option ${c===(it.cat||'Outros')?'selected':''}>${c}</option>`).join("")}</select>
+    </div>`;
   }).join("");
   const res=document.getElementById("addResult"); if(!res) return;
-  res.innerHTML=`<div class="card"><div style="font-size:13px;font-weight:700;margin-bottom:6px">${itens.length} ${itens.length===1?'lançamento':'lançamentos'} — confira e inclua:</div>${linhas}
+  res.innerHTML=`<div class="card"><div style="font-size:13px;font-weight:700;margin-bottom:6px">${itens.length} ${itens.length===1?'lançamento encontrado':'lançamentos encontrados'} — ajuste o tipo e inclua:</div>${linhas}
     <button class="btnG" style="width:100%;margin-top:12px" onclick="_g.incluirTodos()">incluir todos</button></div>`;
 }
+function campoMini(i,key,label,val){
+  return `<label style="flex:1;font-size:10px;color:var(--mute)">${label}<input type="number" inputmode="numeric" value="${val!=null?val:''}" oninput="_g.setCampo(${i},'${key}',this.value)" style="width:100%;border:1.5px solid var(--line);border-radius:8px;padding:7px;font-size:13px;margin-top:2px"></label>`;
+}
+G.setNat=(i,nat)=>{ if(!resultadoTmp||!resultadoTmp[i])return; const it=resultadoTmp[i]; it.natureza=nat;
+  // defaults sensatos ao trocar de tipo
+  if(nat==="estimada"){ if(it.min==null){ const base=+it.valor||0; it.min=base?Math.round(base*0.8):0; it.max=base?Math.round(base*1.2):0; } }
+  if(nat==="parcela"){ if(it.restam==null) it.restam=2; if(it.valor==null) it.valor=0; }
+  if(nat==="eventual"){ if(it.mesIdx==null) it.mesIdx=0; }
+  mostrarResultado(resultadoTmp); };
+G.setNome=(i,v)=>{ if(resultadoTmp&&resultadoTmp[i]) resultadoTmp[i].nome=v; };
+G.setCat=(i,v)=>{ if(resultadoTmp&&resultadoTmp[i]) resultadoTmp[i].cat=v; };
+G.setCampo=(i,key,v)=>{ if(resultadoTmp&&resultadoTmp[i]) resultadoTmp[i][key]=v===""?null:Number(v); };
 G.incluir=i=>{ const it=resultadoTmp&&resultadoTmp[i]; if(!it) return; lancar(normaliza(it)); resultadoTmp.splice(i,1); if(resultadoTmp.length) mostrarResultado(resultadoTmp); else { document.getElementById("addResult").innerHTML=""; status("Incluído ✓ — veja em Despesas.",false); } };
 G.incluirTodos=()=>{ if(!resultadoTmp) return; resultadoTmp.forEach(it=>lancar(normaliza(it))); resultadoTmp=null; document.getElementById("addResult").innerHTML=""; status("Tudo incluído ✓",false); };
 function normaliza(it){
