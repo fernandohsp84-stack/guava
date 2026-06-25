@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#F8FAFC" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Guava" />
+<title>Guava — gestão familiar</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  :root{
+    --bg:#F8FAFC; --card:#fff; --blue:#1E3A8A; --blueSoft:#E5EAF6;
+    --green:#065F46; --greenSoft:#E2EFEA; --graphite:#334155; --graphiteSoft:#E8ECF1;
+    --guava:#FA8072; --guavaSoft:#FDECEA; --line:#E2E8F0; --mute:#64748B; --ink:#0F172A;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',-apple-system,system-ui,sans-serif;padding-bottom:calc(76px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased}
+  button,input,select,textarea{font-family:inherit;font-size:16px}
+  button{cursor:pointer}
+  button:active{opacity:.7}
+  main{max-width:600px;margin:0 auto;padding:0 14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;animation:pop .25s ease both}
+  @keyframes pop{0%{transform:translateY(6px);opacity:0}100%{transform:none;opacity:1}}
+  @media(prefers-reduced-motion:reduce){.card{animation:none}}
+  h2{font-size:20px;font-weight:800;letter-spacing:-.3px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .btnP{background:var(--blue);color:#fff;border:none;border-radius:12px;padding:14px 18px;font-size:15px;font-weight:700;min-height:50px}
+  .btnG{background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:14px 16px;font-size:15px;font-weight:700;min-height:50px}
+  .inp{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:12px;font-size:16px;margin-top:4px;background:#fff}
+  .pill{padding:9px 14px;border-radius:20px;white-space:nowrap;font-size:13px;font-weight:600;border:1.5px solid var(--line);background:#fff;color:var(--mute);min-height:38px}
+  nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:50}
+  nav button{flex:1;background:none;border:none;padding:8px 0 10px;color:var(--mute);min-width:0}
+  nav button.on{color:var(--blue)}
+  nav .ic{font-size:19px;line-height:1}
+  nav .lb{font-size:9.5px;font-weight:500;margin-top:3px}
+  nav button.on .lb{font-weight:700}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top))}
+  .hgrid{max-width:600px;margin:0 auto;display:flex;justify-content:space-between;align-items:center}
+  .barTrack{height:14px;border-radius:8px;background:var(--graphiteSoft);overflow:hidden;position:relative;margin-top:10px}
+  .toggle{display:flex;background:var(--graphiteSoft);border-radius:12px;padding:3px}
+  .toggle button{padding:9px 18px;border-radius:9px;border:none;font-size:14px;font-weight:700;background:transparent;color:var(--mute)}
+  .toggle button.on{background:var(--blue);color:#fff}
+  .hidden{display:none}
+  .loadDot{text-align:center;color:var(--mute);font-size:14px;padding:16px}
+  table{width:100%;border-collapse:collapse}
+  .saveTag{position:fixed;top:calc(8px + env(safe-area-inset-top));right:12px;background:var(--green);color:#fff;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;z-index:60;opacity:0;transition:opacity .3s}
+  .saveTag.show{opacity:.95}
+  .banner{background:var(--guavaSoft);border:1px solid #F6D2CD;color:#B23B2E;font-size:13px;padding:10px 12px;border-radius:10px;margin:12px 0;line-height:1.5}
+  label.fld{display:block;font-size:12px;color:var(--mute);font-weight:600;margin-top:10px}
+</style>
+</head>
+<body>
+<div id="saveTag" class="saveTag">salvo ✓</div>
+
+<header>
+  <div class="hgrid" style="position:relative;justify-content:center">
+    <div style="display:flex;align-items:center;gap:9px">
+      <svg width="30" height="32" viewBox="0 0 30 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Guava">
+        <!-- folha -->
+        <path d="M16.4 5.2c1.6-2.1 4.1-3 6.2-2.7-.2 2.1-1.5 4.2-3.6 5.1-1 .4-2 .5-2.9.3" fill="#8BC79B"/>
+        <!-- corpo da goiaba -->
+        <path d="M15 7.3c-.7 0-1.3.3-1.9.7C8.7 8.7 5 12.9 5 18.3 5 24.2 9.5 29 15 29s10-4.8 10-10.7c0-5.4-3.7-9.6-8.1-10.3-.6-.4-1.2-.7-1.9-.7z" fill="#9FD3AC"/>
+        <!-- realce suave -->
+        <ellipse cx="11.3" cy="16" rx="2.4" ry="3.4" fill="#B6E0BF" opacity=".6"/>
+      </svg>
+      <span style="font-size:25px;font-weight:800;letter-spacing:-.6px;color:#1F2937">Guava</span>
+    </div>
+    <button id="rendaBtn" style="position:absolute;right:0;text-align:right;background:none;border:none">
+      <div style="font-size:9.5px;color:var(--mute)">renda</div>
+      <div id="rendaVal" style="font-size:14px;font-weight:800;color:var(--blue)">R$ 0 ✏️</div>
+    </button>
+  </div>
+  <div id="hsub" style="font-size:11px;color:var(--mute);text-align:center;margin-top:3px">gestão familiar</div>
+</header>
+
+<main id="app"></main>
+<nav id="nav"></nav>
+
+<script>
+"use strict";
+// =====================================================================
+//  GUAVA — versão mobile-first. Tudo opera pelo celular.
+//  - Configuração do Firebase e da função fica DENTRO do app (tela ⚙️).
+//  - Funciona offline desde o início (localStorage). Firebase é opcional
+//    e, quando configurado, sincroniza entre aparelhos.
+//  - Texto/voz interpretados localmente OU pela função de IA (se houver).
+//  - Foto/PDF exigem a função de IA configurada.
+// =====================================================================
+
+const MESES=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+const CATEGORIAS=["Moradia","Mercado","Restaurante","Transporte","Saúde","Educação","Lazer","Vestuário","Assinaturas","Contas","Impostos","Outros"];
+const NAT_LABEL={ordinaria:"Ordinária (mensal fixa)",estimada:"Estimada (a confirmar)",eventual:"Eventual (mês específico)",parcela:"Parcela do cartão"};
+const NAT_COR={ordinaria:"#334155",estimada:"#065F46",eventual:"#1E3A8A",parcela:"#FA8072"};
+const fmt=n=>(n<0?"-":"")+"R$ "+Math.abs(Math.round(n)).toLocaleString("pt-BR");
+const provavel=it=>it.natureza==="estimada"?(((+it.min||0)+(+it.max||0))/2):(+it.valor||0);
+const escapeAttr=s=>String(s==null?"":s).replace(/"/g,"&quot;").replace(/</g,"&lt;");
+
+// ====================================================================
+//  URL da função de IA embutida de fábrica (para distribuir aos testadores).
+//  Cole aqui a URL da sua função publicada (termina em /interpretarDespesa).
+//  Assim o PDF e a foto funcionam para todos sem ninguém configurar nada.
+//  Deixe "" se não quiser função embutida.
+const FUNCAO_URL_PADRAO = "";
+// ====================================================================
+
+// ---------- estado ----------
+let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],historico:[],pagosMes:{},mesRef:""};
+let cfg={firebase:null,funcaoUrl:""};
+let tab="inicio", modoAdd="texto", filtroDesp="todos";
+let ouvindo=false, rec=null, resultadoTmp=null;
+let fb={app:null,db:null,auth:null,uid:null,ref:null,unsub:null};
+
+const seed=[
+  // ===== ORDINÁRIAS (assinaturas e recorrentes previsíveis) =====
+  {id:"o1",nome:"Netflix",natureza:"ordinaria",valor:73,cat:"Assinaturas"},
+  {id:"o2",nome:"Disney+",natureza:"ordinaria",valor:67,cat:"Assinaturas"},
+  {id:"o3",nome:"Amazon Prime + Canais",natureza:"ordinaria",valor:82,cat:"Assinaturas"},
+  {id:"o4",nome:"Apple (iCloud/serviços)",natureza:"ordinaria",valor:100,cat:"Assinaturas"},
+  {id:"o5",nome:"Wellhub (academia)",natureza:"ordinaria",valor:642,cat:"Saúde"},
+  {id:"o6",nome:"Claro (telefone/internet)",natureza:"ordinaria",valor:520,cat:"Contas"},
+  {id:"o7",nome:"Tokio Marine (seguro auto)",natureza:"ordinaria",valor:179,cat:"Saúde"},
+  {id:"o8",nome:"Condomínio",natureza:"ordinaria",valor:162,cat:"Moradia"},
+  // ===== ESTIMADAS (avulsos agregados por categoria, faixa min-max) =====
+  {id:"e1",nome:"Restaurantes e bares",natureza:"estimada",min:2500,max:4000,cat:"Restaurante"},
+  {id:"e2",nome:"Mercado e adega",natureza:"estimada",min:1200,max:1900,cat:"Mercado"},
+  {id:"e3",nome:"Transporte (Uber/combustível)",natureza:"estimada",min:500,max:900,cat:"Transporte"},
+  {id:"e4",nome:"Farmácia",natureza:"estimada",min:200,max:400,cat:"Saúde"},
+  {id:"e5",nome:"Energia (Neoenergia)",natureza:"estimada",min:450,max:550,cat:"Contas"},
+  {id:"e6",nome:"Cafés e padaria",natureza:"estimada",min:300,max:600,cat:"Restaurante"},
+  // ===== PARCELAS EM CURSO (posição mais recente das faturas) =====
+  {id:"p1",nome:"Maple Bear (escola)",natureza:"parcela",valor:441,restam:3,total:4410,cat:"Educação"},
+  {id:"p2",nome:"PicPay Escola Maple Bear",natureza:"parcela",valor:387,restam:5,total:3870,cat:"Educação"},
+  {id:"p3",nome:"Mercure Hotel BH",natureza:"parcela",valor:440,restam:4,total:2640,cat:"Lazer"},
+  {id:"p4",nome:"Nomad",natureza:"parcela",valor:538,restam:12,total:6456,cat:"Outros"},
+  {id:"p5",nome:"Smiles (passagens)",natureza:"parcela",valor:368,restam:10,total:3680,cat:"Lazer"},
+  {id:"p6",nome:"Amazon (5/10)",natureza:"parcela",valor:292,restam:6,total:2920,cat:"Outros"},
+  {id:"p7",nome:"Estok Distribuidora",natureza:"parcela",valor:194,restam:5,total:1940,cat:"Outros"},
+  {id:"p8",nome:"Estok Distrib (5/7)",natureza:"parcela",valor:163,restam:3,total:1141,cat:"Outros"},
+  {id:"p9",nome:"PicPay Condomínio",natureza:"parcela",valor:162,restam:12,total:1944,cat:"Moradia"},
+  {id:"p10",nome:"Zerezes",natureza:"parcela",valor:155,restam:3,total:930,cat:"Vestuário"},
+  {id:"p11",nome:"Mercado Livre",natureza:"parcela",valor:89,restam:6,total:1068,cat:"Outros"},
+  {id:"p12",nome:"Blis Tecnologia",natureza:"parcela",valor:86,restam:5,total:860,cat:"Outros"},
+  {id:"p13",nome:"Mercado Livre (4/10)",natureza:"parcela",valor:130,restam:7,total:1300,cat:"Outros"},
+  {id:"p14",nome:"MP Noma",natureza:"parcela",valor:104,restam:2,total:417,cat:"Restaurante"},
+  {id:"p15",nome:"PlayStation",natureza:"parcela",valor:103,restam:4,total:414,cat:"Lazer"},
+  {id:"p16",nome:"Leiturinha",natureza:"parcela",valor:64,restam:12,total:763,cat:"Educação"},
+  {id:"p17",nome:"Panini Brasil",natureza:"parcela",valor:59,restam:12,total:708,cat:"Lazer"},
+  {id:"p18",nome:"Art Sport",natureza:"parcela",valor:133,restam:6,total:800,cat:"Vestuário"},
+  {id:"p19",nome:"TNF (vestuário)",natureza:"parcela",valor:317,restam:6,total:1899,cat:"Vestuário"},
+  {id:"p20",nome:"Decathlon",natureza:"parcela",valor:198,restam:10,total:1980,cat:"Vestuário"},
+  {id:"p21",nome:"Kubaaudio",natureza:"parcela",valor:233,restam:6,total:1399,cat:"Outros"},
+  {id:"p22",nome:"Leituraterraco",natureza:"parcela",valor:101,restam:2,total:201,cat:"Lazer"},
+  {id:"p23",nome:"School Picture",natureza:"parcela",valor:61,restam:6,total:366,cat:"Educação"},
+  {id:"p24",nome:"Amazon (5/9)",natureza:"parcela",valor:55,restam:5,total:275,cat:"Outros"},
+];
+
+// ---------- persistência local ----------
+const LS_STATE="guava_state_v1", LS_CFG="guava_cfg_v1";
+function carregarLocal(){
+  try{ const s=localStorage.getItem(LS_STATE); if(s) state={...state,...JSON.parse(s)}; else state.itens=seed; }
+  catch{ state.itens=seed; }
+  try{ const c=localStorage.getItem(LS_CFG); if(c) cfg={...cfg,...JSON.parse(c)}; }catch{}
+  // URL de fábrica: usada se o usuário ainda não definiu uma própria
+  if(!cfg.funcaoUrl && FUNCAO_URL_PADRAO) cfg.funcaoUrl = FUNCAO_URL_PADRAO;
+}
+function salvarLocal(){ try{ localStorage.setItem(LS_STATE,JSON.stringify(state)); }catch{} }
+function salvarCfg(){ try{ localStorage.setItem(LS_CFG,JSON.stringify(cfg)); }catch{} }
+
+let saveTimer=null;
+function salvar(){
+  salvarLocal();
+  flashSave();
+  if(fb.ref){
+    clearTimeout(saveTimer);
+    saveTimer=setTimeout(()=>{ gravarFirebase(); }, 600);
+  }
+}
+function flashSave(){
+  const t=document.getElementById("saveTag");
+  t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),1100);
+}
+
+// ---------- Firebase (carregado só se configurado) ----------
+async function iniciarFirebase(){
+  if(!cfg.firebase) return;
+  try{
+    const [{initializeApp},{getFirestore,doc,getDoc,setDoc,onSnapshot},{getAuth,signInAnonymously,onAuthStateChanged}]=await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"),
+      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"),
+    ]);
+    fb.app=initializeApp(cfg.firebase);
+    fb.db=getFirestore(fb.app);
+    fb.auth=getAuth(fb.app);
+    fb._api={doc,getDoc,setDoc,onSnapshot};
+    onAuthStateChanged(fb.auth,async(user)=>{
+      if(!user){ signInAnonymously(fb.auth).catch(e=>banner("Login Firebase falhou: "+e.message)); return; }
+      fb.uid=user.uid;
+      fb.ref=doc(fb.db,"usuarios",user.uid);
+      const snap=await getDoc(fb.ref);
+      if(snap.exists()){ state={...state,...snap.data()}; salvarLocal(); render(); }
+      else { await gravarFirebase(); }
+      if(fb.unsub) fb.unsub();
+      fb.unsub=onSnapshot(fb.ref,d=>{ if(d.exists()){ state={...state,...d.data()}; salvarLocal(); render(); }});
+    });
+  }catch(e){ banner("Não consegui iniciar o Firebase. Verifique a configuração em ⚙️."); }
+}
+async function gravarFirebase(){
+  if(!fb.ref||!fb._api) return;
+  try{ await fb._api.setDoc(fb.ref,state,{merge:true}); }
+  catch(e){ /* mantém local; tenta de novo no próximo save */ }
+}
+let bannerMsg="";
+function banner(m){ bannerMsg=m; const el=document.getElementById("bannerSlot"); if(el) el.innerHTML=m?`<div class="banner">${m}</div>`:""; }
+
+// ---------- projeção ----------
+function gastoDoMes(i){
+  let fixo=0,estimado=0,eventual=0,parcela=0;
+  for(const it of state.itens){
+    if(it.natureza==="ordinaria") fixo+=+it.valor||0;
+    else if(it.natureza==="estimada") estimado+=provavel(it);
+    else if(it.natureza==="eventual"){ if((+it.mesIdx||0)===i) eventual+=+it.valor||0; }
+    else if(it.natureza==="parcela"){ if(i<(+it.restam||0)) parcela+=+it.valor||0; }
+  }
+  return {fixo,estimado,eventual,parcela,total:fixo+estimado+eventual+parcela};
+}
+function projecao(){
+  const now=new Date(),out=[];
+  for(let i=0;i<state.horizonte;i++){
+    const g=gastoDoMes(i), ideal=state.renda*(1-state.metaPct);
+    const mIdx=(now.getMonth()+i)%12, ano=now.getFullYear()+Math.floor((now.getMonth()+i)/12);
+    out.push({...g,idx:i,mes:MESES[mIdx],ano,ideal,sobra:state.renda-g.total});
+  }
+  return out;
+}
+
+// projeção visual da home: mês anterior + atual + próximos 10 (12 colunas)
+function projecaoHome(){
+  const now=new Date(), out=[];
+  for(let off=-1; off<=10; off++){
+    const g = off<0 ? gastoMesAnterior() : gastoDoMes(off);
+    const ideal=state.renda*(1-state.metaPct);
+    const d=new Date(now.getFullYear(), now.getMonth()+off, 1);
+    out.push({...g, off, mes:MESES[d.getMonth()], ano:d.getFullYear(),
+      ideal, sobra:state.renda-g.total, atual:off===0, passado:off<0});
+  }
+  return out;
+}
+// mês anterior: aproxima usando ordinárias+estimadas (recorrentes); parcelas e eventuais
+// do passado não são modeladas, então usa a base recorrente como referência histórica.
+function gastoMesAnterior(){
+  let fixo=0,estimado=0;
+  for(const it of state.itens){
+    if(it.natureza==="ordinaria") fixo+=+it.valor||0;
+    else if(it.natureza==="estimada") estimado+=provavel(it);
+  }
+  // assume que as parcelas atuais também existiam no mês anterior (visão conservadora)
+  let parcela=0;
+  for(const it of state.itens) if(it.natureza==="parcela" && (+it.restam||0)>0) parcela+=+it.valor||0;
+  return {fixo,estimado,eventual:0,parcela,total:fixo+estimado+parcela};
+}
+
+// ---- Escore de comportamento financeiro (GAP como target) + retrospectivo ----
+function calcularEscore(p, renda, metaPct){
+  const n=p.length||1, guardarAlvo=renda*metaPct;
+  const gapMeses=p.filter(x=>x.sobra<0).length;
+  const gapTotal=p.reduce((s,x)=>s+(x.sobra<0?-x.sobra:0),0);
+  // "quase-GAP": meses sem déficit mas com sobra abaixo da meta (alerta antecipado)
+  const quaseGap=p.filter(x=>x.sobra>=0 && x.sobra<guardarAlvo).length;
+  // saúde do GAP: déficit conta inteiro, quase-GAP conta meio. Penalidade não-linear.
+  const pesoRisco=(gapMeses + 0.5*quaseGap)/n;
+  const fracSemGap=Math.pow(Math.max(0,1-pesoRisco), 1.3);
+  const folgaMedia=p.reduce((s,x)=>s+x.sobra,0)/n;
+  const fracFolga=Math.max(0,Math.min(folgaMedia/Math.max(renda*metaPct,1),1));
+  const parcelaMedia=p.reduce((s,x)=>s+x.parcela,0)/n;
+  const compromisso=parcelaMedia/Math.max(renda,1);
+  const fracParcela=Math.max(0,Math.min((0.30-compromisso)/0.30,1));
+  const cumpreMeta=p.filter(x=>x.sobra>=guardarAlvo).length/n;
+  const W={gap:0.50,folga:0.18,parcela:0.18,meta:0.14};
+  const scoreFuturo=100*(W.gap*fracSemGap+W.folga*fracFolga+W.parcela*fracParcela+W.meta*cumpreMeta);
+
+  // ---- componente RETROSPECTIVO: disciplina real dos meses fechados ----
+  const fechados=(state.historico||[]).filter(h=>h.fechado);
+  let scoreRetro=null;
+  if(fechados.length){
+    let soma=0;
+    for(const h of fechados){
+      const prev=h.previsto||0, pago=h.pago||0, rmes=h.renda||renda;
+      const dentroRenda = pago<=rmes ? 1 : Math.max(0, 1-(pago-rmes)/rmes);
+      const aderiu = prev>0 ? Math.max(0, 1-Math.abs(pago-prev)/prev) : 1;
+      soma += 0.6*dentroRenda + 0.4*aderiu;
+    }
+    scoreRetro=100*(soma/fechados.length);
+  }
+
+  // ---- combinação: histórico ganha peso até 40% conforme acumula ----
+  let score, pesoRetro=0;
+  if(scoreRetro!=null){
+    pesoRetro=Math.min(0.40, fechados.length*0.10);
+    score=Math.round((1-pesoRetro)*scoreFuturo + pesoRetro*scoreRetro);
+  }else{
+    score=Math.round(scoreFuturo);
+  }
+
+  let faixa;
+  if(score>=85) faixa={nome:"Excelente",cor:"#065F46"};
+  else if(score>=65) faixa={nome:"Saudável",cor:"#3E8E5A"};
+  else if(score>=40) faixa={nome:"Atenção",cor:"#E0922F"};
+  else faixa={nome:"Crítico",cor:"#FA8072"};
+  return {score,faixa,gapMeses,gapTotal,quaseGap,
+    scoreFuturo:Math.round(scoreFuturo),
+    scoreRetro:scoreRetro!=null?Math.round(scoreRetro):null,
+    pesoRetro, mesesFechados:fechados.length,
+    fatores:[
+      {nome:"Sem déficit (GAP)",frac:fracSemGap,peso:W.gap},
+      {nome:"Folga de caixa",frac:fracFolga,peso:W.folga},
+      {nome:"Parcelas sob controle",frac:fracParcela,peso:W.parcela},
+      {nome:"Meta de poupança",frac:cumpreMeta,peso:W.meta},
+    ]};
+}
+
+// cartão do escore na home
+function cardEscore(esc){
+  const ang=esc.score*3.6; // 0-360
+  const anel=`conic-gradient(${esc.faixa.cor} ${ang}deg, var(--graphiteSoft) ${ang}deg)`;
+  const gapTxt=esc.gapMeses>0
+    ? `<span style="color:var(--guava);font-weight:700">${esc.gapMeses} ${esc.gapMeses===1?'mês':'meses'}</span> com déficit (GAP de ${fmt(esc.gapTotal)})`
+    : esc.quaseGap>0
+      ? `<span style="color:var(--amber,#E0922F);font-weight:700">${esc.quaseGap} ${esc.quaseGap===1?'mês fica':'meses ficam'}</span> com folga abaixo da meta`
+      : `<span style="color:var(--green);font-weight:700">nenhum mês</span> com déficit projetado`;
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="width:84px;height:84px;border-radius:50%;background:${anel};display:flex;align-items:center;justify-content:center;flex:none">
+        <div style="width:64px;height:64px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <span style="font-size:22px;font-weight:800;color:${esc.faixa.cor};line-height:1">${esc.score}</span>
+          <span style="font-size:8.5px;color:var(--mute)">de 100</span>
+        </div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:700;color:var(--graphite);letter-spacing:.3px">ESCORE DE COMPORTAMENTO</div>
+        <div style="font-size:17px;font-weight:800;color:${esc.faixa.cor};margin:2px 0 3px">${esc.faixa.nome}</div>
+        <div style="font-size:12px;color:var(--mute);line-height:1.4">${gapTxt}</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">
+      ${esc.fatores.map(f=>`<div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;color:var(--mute);width:120px;flex:none">${f.nome}</span>
+        <div style="flex:1;height:6px;border-radius:4px;background:var(--graphiteSoft);overflow:hidden">
+          <div style="width:${Math.round(f.frac*100)}%;height:100%;background:${esc.faixa.cor};opacity:.85"></div></div>
+        <span style="font-size:10.5px;color:var(--mute);width:30px;text-align:right">${Math.round(f.frac*100)}%</span>
+      </div>`).join("")}
+    </div>
+    ${esc.scoreRetro!=null?`<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-size:11.5px">
+      <span style="color:var(--mute)">📈 projeção futura <b style="color:var(--ink)">${esc.scoreFuturo}</b></span>
+      <span style="color:var(--mute)">📅 histórico real <b style="color:var(--ink)">${esc.scoreRetro}</b> · ${esc.mesesFechados} ${esc.mesesFechados===1?'mês':'meses'}</span>
+    </div>`:""}
+    <div style="font-size:10.5px;color:var(--mute);margin-top:10px;line-height:1.4">O alvo do escore é zerar o GAP — meses em que as despesas projetadas superam a receita.${esc.scoreRetro!=null?` Agora ele também pesa seu histórico real (${Math.round(esc.pesoRetro*100)}%).`:""}</div>
+  </div>`;
+}
+
+// gráfico da home: mês anterior + atual + 10 futuros, parcelas destacadas
+function cardGraficoHome(p12, esc){
+  const ph=projecaoHome();
+  const maxV=Math.max(...ph.map(x=>Math.max(x.total,state.renda)),1);
+  const barras=ph.map(x=>{
+    const h=(x.total/maxV)*120, tt=Math.max(x.total,1), over=x.total>state.renda;
+    const rendaY=(state.renda/maxV)*120;
+    const seg=(val,col,op=1)=>val>0?`<div style="height:${(val/tt)*100}%;background:${col};opacity:${op}"></div>`:"";
+    const baseCor = x.passado ? "#94A3B8" : (over ? "#1E293B" : "var(--graphite)");
+    const estCor  = x.passado ? "#B6C2CF" : "var(--green)";
+    return `<div style="flex:1;min-width:18px;display:flex;flex-direction:column;align-items:center">
+      <div style="width:100%;height:120px;position:relative;display:flex;align-items:flex-end">
+        <div style="position:absolute;bottom:${rendaY}px;left:0;right:0;height:1px;background:var(--blue);opacity:.4"></div>
+        <div style="width:100%;height:${h}px;border-radius:4px 4px 0 0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;${x.atual?'box-shadow:0 0 0 2px var(--blue)':''}">
+          ${seg(x.parcela,"var(--guava)",x.passado?.55:.95)}${seg(x.eventual,"var(--blue)",.8)}${seg(x.estimado,estCor,.6)}${seg(x.fixo,baseCor)}
+        </div>
+      </div>
+      <div style="font-size:8px;color:${x.atual?'var(--blue)':'var(--mute)'};font-weight:${x.atual?700:400};margin-top:3px">${x.mes}</div>
+    </div>`;
+  }).join("");
+  const totParc=ph.filter(x=>!x.passado).reduce((s,x)=>s+x.parcela,0);
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+      <span style="font-size:11px;font-weight:700;color:var(--graphite);letter-spacing:.3px">VISÃO 12 MESES</span>
+      <span style="font-size:11px;color:var(--mute)">anterior · atual · +10</span>
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:3px;height:140px;padding-top:8px">${barras}</div>
+    <div style="display:flex;gap:12px;justify-content:center;margin-top:8px;flex-wrap:wrap">
+      ${[["Fixas","var(--graphite)"],["Estimadas","var(--green)"],["Parcelas","var(--guava)"]].map(([l,c])=>`<span style="font-size:10.5px;color:var(--mute);display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:${c}"></span>${l}</span>`).join("")}
+      <span style="font-size:10.5px;color:var(--mute);display:flex;align-items:center;gap:4px"><span style="width:9px;height:2px;background:var(--blue)"></span>renda</span>
+    </div>
+    <div style="font-size:11.5px;color:var(--mute);margin-top:8px;line-height:1.4;border-top:1px solid var(--line);padding-top:8px">
+      💳 As faixas <b style="color:var(--guava)">salmão</b> são parcelas. Nos próximos 10 meses você tem <b>${fmt(totParc)}</b> comprometidos em parcelamentos — esse é o espaço que abre conforme elas terminam.
+    </div>
+  </div>`;
+}
+
+// ---------- itens ----------
+function lancar(item){ item.id=item.natureza[0]+Date.now()+Math.floor(Math.random()*99); state.itens=[...state.itens,item]; salvar(); }
+function atualizar(id,patch){ state.itens=state.itens.map(x=>x.id===id?{...x,...patch}:x); salvar(); }
+function excluir(id){ if(!confirm("Excluir esta despesa?")) return; state.itens=state.itens.filter(x=>x.id!==id); salvar(); render(); }
+
+// ---------- pagamentos e fechamento mensal ----------
+function mesAtualRef(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+function garanteMesRef(){
+  const atual=mesAtualRef();
+  if(state.mesRef!==atual){ state.mesRef=atual; state.pagosMes=state.pagosMes||{}; }
+}
+// Nível 1: quitar uma parcela (reduz restam em 1, registra)
+function quitarParcela(id){
+  const it=state.itens.find(x=>x.id===id); if(!it||it.natureza!=="parcela") return;
+  if((+it.restam||0)<=0) return;
+  const novo=(+it.restam)-1;
+  marcarPago(id);
+  if(novo<=0){ if(confirm("Esta foi a última parcela. Remover \""+it.nome+"\" das despesas?")){ excluir(id); return; } }
+  atualizar(id,{restam:novo, total:(+it.valor||0)*novo});
+  render();
+}
+// Nível 2: marcar/desmarcar despesa como paga no mês corrente
+function marcarPago(id){ garanteMesRef(); state.pagosMes=state.pagosMes||{}; state.pagosMes[id]=true; salvar(); }
+function togglePago(id){ garanteMesRef(); state.pagosMes=state.pagosMes||{}; if(state.pagosMes[id]) delete state.pagosMes[id]; else state.pagosMes[id]=true; salvar(); render(); }
+function estaPago(id){ return !!(state.pagosMes&&state.pagosMes[id]); }
+// valor de uma despesa no mês (para somar previsto/pago)
+function valorMes(it){
+  if(it.natureza==="estimada") return provavel(it);
+  if(it.natureza==="parcela") return (+it.restam||0)>0?(+it.valor||0):0;
+  if(it.natureza==="eventual") return (+it.mesIdx||0)===0?(+it.valor||0):0;
+  return +it.valor||0;
+}
+// Nível 3: fechar o mês — tira foto previsto vs pago e guarda no histórico
+function fecharMes(){
+  garanteMesRef();
+  const ym=state.mesRef;
+  let previsto=0, pago=0;
+  for(const it of state.itens){
+    const v=valorMes(it); previsto+=v;
+    if(estaPago(it.id)) pago+=v;
+  }
+  if(!confirm("Fechar o mês "+ym+"?\nPrevisto: "+fmt(previsto)+"\nPago: "+fmt(pago)+"\n\nIsso registra o mês no histórico e libera o próximo.")) return;
+  state.historico=state.historico||[];
+  // substitui se já existir registro do mesmo mês
+  state.historico=state.historico.filter(h=>h.ym!==ym);
+  state.historico.push({ym, previsto:Math.round(previsto), pago:Math.round(pago), renda:state.renda, fechado:true});
+  state.historico.sort((a,b)=>a.ym<b.ym?-1:1);
+  // avança: zera marcações e parcelas pagas já caíram via quitarParcela
+  state.pagosMes={};
+  state.mesRef=mesAtualRef();
+  salvar(); render();
+  alert("Mês "+ym+" fechado e registrado no histórico ✓");
+}
+
+// =================== RENDER ===================
+const app=document.getElementById("app");
+const G={};
+window._g=G;
+G.setTab=t=>{ tab=t; modoAdd="texto"; render(); window.scrollTo(0,0); };
+G.setHor=h=>{ state.horizonte=h; salvar(); };
+G.setMeta=x=>{ state.metaPct=x; salvar(); };
+G.setFiltro=g=>{ filtroDesp=g; render(); };
+G.setModo=k=>{ modoAdd=k; ouvindo=false; render(); };
+
+function render(){
+  document.getElementById("rendaVal").textContent=fmt(state.renda)+" ✏️";
+  const sync=fb.ref?" · sincronizado":"";
+  document.getElementById("hsub").textContent=`gestão familiar · ${state.horizonte} meses${sync}`;
+  renderNav();
+  if(tab==="inicio") app.innerHTML=viewInicio();
+  else if(tab==="proj") app.innerHTML=viewProj();
+  else if(tab==="despesas") app.innerHTML=viewDespesas();
+  else if(tab==="metas") app.innerHTML=viewMetas();
+  else if(tab==="add"){ app.innerHTML=viewAdd(); ligarAdd(); }
+  else if(tab==="config"){ app.innerHTML=viewConfig(); ligarConfig(); }
+  else if(tab==="saiba") app.innerHTML=viewSaiba();
+}
+function renderNav(){
+  const items=[["inicio","⊞","Início"],["proj","📊","Projeção"],["despesas","📂","Despesas"],["metas","🎯","Metas"],["add","➕","Adicionar"],["saiba","❓","Saiba+"]];
+  document.getElementById("nav").innerHTML=items.map(([k,ic,l])=>
+    `<button class="${tab===k?'on':''}" onclick="_g.setTab('${k}')"><div class="ic">${ic}</div><div class="lb">${l}</div></button>`
+  ).join("");
+}
+
+// ---------- Início ----------
+function viewInicio(){
+  const p=projecao(), m=p[0];
+  const disponivel=state.renda-m.total, guardadoAlvo=state.renda*state.metaPct;
+  const fechaMeta=disponivel>=guardadoAlvo;
+  const pctGasto=Math.min(m.total/Math.max(state.renda,1),1), proximoTeto=pctGasto>0.85;
+  const barCor=proximoTeto?"var(--guava)":pctGasto>(m.ideal/Math.max(state.renda,1))?"var(--graphite)":"var(--green)";
+  const semBackend=!cfg.funcaoUrl;
+  const esc=calcularEscore(p,state.renda,state.metaPct);
+  const rend=(state.metaPct*100); // exibe a meta como % "rendimento/guardado"
+  return `<div id="bannerSlot">${bannerMsg?`<div class="banner">${bannerMsg}</div>`:""}</div>
+  <div style="padding-top:16px">
+    <div class="grid2">
+      <div class="card" style="background:var(--blue);padding:16px 14px;border:none">
+        <div style="font-size:10.5px;font-weight:700;color:#C7D2EA;letter-spacing:.4px">DISPONÍVEL P/ GASTAR</div>
+        <div style="font-size:24px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(disponivel)}</div>
+        <div style="font-size:11px;color:#C7D2EA;margin-top:4px">de ${fmt(state.renda)} de renda</div>
+      </div>
+      <div class="card" style="background:var(--green);padding:16px 14px;border:none">
+        <div style="font-size:10.5px;font-weight:700;color:#BFE0D2;letter-spacing:.4px">GUARDADO / META</div>
+        <div style="font-size:24px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(guardadoAlvo)}</div>
+        <div style="font-size:11px;color:#BFE0D2;margin-top:4px">↑ ${rend.toFixed(0).replace(".",",")}% da renda</div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--graphite);letter-spacing:.3px">LIMITE DE GASTOS MENSAL</div>
+      <div style="font-size:22px;font-weight:800;color:var(--ink);margin-top:4px">${fmt(m.total)}</div>
+      <div class="barTrack" style="margin-top:8px">
+        <div style="position:absolute;left:${(m.ideal/Math.max(state.renda,1))*100}%;top:0;bottom:0;width:2px;background:#fff;opacity:.8;z-index:2"></div>
+        <div style="width:${pctGasto*100}%;height:100%;border-radius:8px;background:linear-gradient(90deg,var(--green),${barCor});transition:width .5s"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:11.5px;color:var(--mute)">
+        <span>${fmt(0)}</span><span>${fmt(state.renda)}</span>
+      </div>
+    </div>
+    ${cardEscore(esc)}
+    ${cardGraficoHome(p,esc)}
+    <div class="card">
+      <div style="font-size:12.5px;font-weight:700;color:var(--graphite);margin-bottom:8px">Composição deste mês</div>
+      ${miniRow("Ordinárias (fixas)",m.fixo,"var(--graphite)")}
+      ${miniRow("Estimadas (a confirmar)",m.estimado,"var(--mute)")}
+      ${miniRow("Eventuais",m.eventual,"var(--graphite)")}
+      ${miniRow("Parcelas do cartão",m.parcela,"var(--guava)")}
+    </div>
+    <div class="grid2">
+      ${atalho("📊","Projeção",`${p.length} meses`,"proj","var(--blue)")}
+      ${atalho("📂","Despesas","incluir / editar","despesas","var(--graphite)")}
+      ${atalho("🎯","Metas",fechaMeta?"no alvo":"ajustar","metas","var(--green)")}
+      ${atalho("⚙️","Configurar",semBackend?"ativar IA + sync":"conta / IA","config","var(--mute)")}
+    </div>
+    ${semBackend?`<div style="font-size:12px;color:var(--mute);text-align:center;padding:4px 10px 12px">💡 Texto e voz já funcionam. Para foto/PDF e sincronizar entre aparelhos, toque em ⚙️ Configurar.</div>`:""}
+  </div>`;
+}
+const miniRow=(l,v,c)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:${c}"></span>${l}</span><span style="font-weight:600;color:${c}">${fmt(v)}</span></div>`;
+const atalho=(ic,l,s,t,c)=>`<button class="card" onclick="_g.setTab('${t}')" style="padding:16px 14px;text-align:left;display:block;width:100%"><div style="font-size:22px">${ic}</div><div style="font-size:14.5px;font-weight:700;color:${c};margin-top:6px">${l}</div><div style="font-size:11px;color:var(--mute)">${s}</div></button>`;
+
+// ---------- Projeção ----------
+function viewProj(){
+  const p=projecao(), maxV=Math.max(...p.map(x=>Math.max(x.total,state.renda)),1);
+  const estouro=p.filter(x=>x.total>state.renda).length, atencao=p.filter(x=>x.total>x.ideal).length;
+  const aviso=estouro>0?`🛑 ${estouro} ${estouro===1?'mês ultrapassa':'meses ultrapassam'} a renda`
+    :atencao>0?`${atencao} ${atencao===1?'mês fica':'meses ficam'} acima do ideal`:"todos os meses dentro do ideal 👏";
+  const barras=p.map(x=>{
+    const h=(x.total/maxV)*130, idealY=(x.ideal/maxV)*130, over=x.total>state.renda, tt=Math.max(x.total,1);
+    const seg=(val,col,op=1)=>val>0?`<div style="height:${(val/tt)*100}%;background:${col};opacity:${op}"></div>`:"";
+    return `<div style="min-width:${state.horizonte===18?15:22}px;flex:1;display:flex;flex-direction:column;align-items:center">
+      <div style="width:100%;height:130px;position:relative;display:flex;align-items:flex-end">
+        <div style="position:absolute;bottom:${idealY}px;left:0;right:0;height:1px;background:var(--green);opacity:.45"></div>
+        <div style="width:100%;height:${h}px;border-radius:4px 4px 0 0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end">
+          ${seg(x.parcela,"var(--guava)",.9)}${seg(x.eventual,"var(--blue)",.8)}${seg(x.estimado,"var(--green)",.55)}${seg(x.fixo,over?"#1E293B":"var(--graphite)")}
+        </div>
+      </div>
+      <div style="font-size:8.5px;color:var(--mute);margin-top:3px">${x.mes}</div>
+    </div>`;
+  }).join("");
+  const linhas=p.map((x,i)=>`<tr style="background:${i%2?'var(--bg)':'#fff'};border-bottom:1px solid var(--line)">
+    <td style="padding:10px 12px;font-size:13px;font-weight:600">${x.mes}/${String(x.ano).slice(2)}</td>
+    <td style="padding:10px 12px;font-size:13px;text-align:right;color:${x.total>state.renda?'var(--guava)':x.total>x.ideal?'var(--graphite)':'var(--ink)'}">${fmt(x.total)}</td>
+    <td style="padding:10px 12px;font-size:13px;text-align:right;color:var(--mute)">${fmt(x.ideal)}</td>
+    <td style="padding:10px 12px;font-size:13px;text-align:right;font-weight:700;color:${x.sobra>=0?'var(--green)':'var(--guava)'}">${x.sobra>=0?'+':''}${fmt(x.sobra)}</td></tr>`).join("");
+  const leg=[["Fixas","var(--graphite)"],["Estimadas","var(--green)"],["Eventuais","var(--blue)"],["Parcelas","var(--guava)"]]
+    .map(([l,c])=>`<span style="font-size:11px;color:var(--mute);display:flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:2px;background:${c}"></span>${l}</span>`).join("");
+  return `<div style="padding-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2>Projeção</h2>
+      <div class="toggle">
+        <button class="${state.horizonte===12?'on':''}" onclick="_g.setHor(12)">12m</button>
+        <button class="${state.horizonte===18?'on':''}" onclick="_g.setHor(18)">18m</button>
+      </div>
+    </div>
+    <div style="font-size:13px;color:${estouro?'var(--guava)':'var(--mute)'};margin-bottom:10px">${aviso}</div>
+    <div class="card">
+      <div style="display:flex;align-items:flex-end;gap:3px;height:150px;padding-top:6px;overflow-x:auto">${barras}</div>
+      <div style="display:flex;gap:12px;justify-content:center;margin-top:10px;flex-wrap:wrap">${leg}</div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table><thead><tr style="background:var(--graphite);color:#fff;font-size:11px;font-weight:700">
+        <td style="padding:10px 12px">Mês</td><td style="padding:10px 12px;text-align:right">Gasto</td>
+        <td style="padding:10px 12px;text-align:right">Ideal</td><td style="padding:10px 12px;text-align:right">Saldo</td>
+      </tr></thead><tbody>${linhas}</tbody></table>
+    </div>
+  </div>`;
+}
+
+// ---------- Despesas ----------
+function viewDespesas(){
+  garanteMesRef();
+  const grupos=["ordinaria","estimada","eventual","parcela"];
+  const vis=filtroDesp==="todos"?state.itens:state.itens.filter(i=>i.natureza===filtroDesp);
+  const pills=["todos",...grupos].map(g=>{
+    const on=filtroDesp===g, cor=NAT_COR[g]||"var(--blue)";
+    const txt=g==="todos"?"Todas":NAT_LABEL[g].split(" ")[0];
+    return `<button class="pill" onclick="_g.setFiltro('${g}')" style="${on?`background:${cor};color:#fff;border-color:${cor}`:''}">${txt}</button>`;
+  }).join("");
+  // progresso de pagamento do mês
+  let previsto=0, pagoTot=0;
+  for(const it of state.itens){ const v=valorMes(it); if(v>0){ previsto+=v; if(estaPago(it.id)) pagoTot+=v; } }
+  const pct=previsto>0?Math.round((pagoTot/previsto)*100):0;
+  const cab=`<div class="card" style="background:var(--greenSoft);border-color:#BFE0D2">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="font-size:12.5px;font-weight:700;color:var(--green)">Pagamentos de ${state.mesRef}</span>
+      <span style="font-size:12.5px;font-weight:700;color:var(--green)">${fmt(pagoTot)} / ${fmt(previsto)}</span>
+    </div>
+    <div class="barTrack" style="background:#CDE3D3;margin-top:8px"><div style="width:${pct}%;height:100%;border-radius:8px;background:var(--green)"></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+      <span style="font-size:11.5px;color:var(--green)">${pct}% pago este mês</span>
+      <button onclick="_g.fecharMes()" style="background:var(--green);border:none;color:#fff;font-size:12px;font-weight:700;padding:8px 14px;border-radius:9px">📅 Fechar mês</button>
+    </div>
+  </div>`;
+  const cards=vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">Nenhuma despesa aqui. Use ➕ Adicionar.</div>`;
+  return `<div style="padding-top:16px"><h2 style="margin-bottom:12px">Despesas</h2>
+    ${cab}
+    <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px">${pills}</div>${cards}</div>`;
+}
+function itemCard(it){
+  const v=it.natureza==="estimada"?provavel(it):(+it.valor||0);
+  const pago=estaPago(it.id);
+  const sub=`${it.cat} · ${NAT_LABEL[it.natureza]}`
+    +(it.natureza==="estimada"?` · ${fmt(+it.min||0)}–${fmt(+it.max||0)}`:"")
+    +(it.natureza==="eventual"?` · ${MESES[(new Date().getMonth()+(+it.mesIdx||0))%12]}`:"")
+    +(it.natureza==="parcela"?` · faltam ${it.restam}x`:"");
+  // ação de pagamento conforme natureza
+  const acaoPag = it.natureza==="parcela"
+    ? `<button onclick="_g.quitarParcela('${it.id}')" style="background:var(--green);border:none;color:#fff;font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px">✓ paguei esta parcela</button>`
+    : `<button onclick="_g.togglePago('${it.id}')" style="background:${pago?'var(--green)':'#fff'};border:1.5px solid ${pago?'var(--green)':'var(--line)'};color:${pago?'#fff':'var(--mute)'};font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px">${pago?'✓ pago este mês':'marcar pago'}</button>`;
+  return `<div class="card" style="padding:13px 14px;${pago?'opacity:.78':''}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:2px;background:${NAT_COR[it.natureza]};flex:none"></span><span style="font-weight:700;font-size:15px">${it.nome}</span>${pago?' <span style="font-size:10px;color:var(--green);font-weight:700">PAGO</span>':''}</div>
+        <div style="font-size:11.5px;color:var(--mute);margin-top:3px;margin-left:15px">${sub}</div>
+      </div>
+      <div style="text-align:right;flex:none">
+        <div style="font-weight:800;font-size:15px;color:${NAT_COR[it.natureza]}">${fmt(v)}${it.natureza==="estimada"?' <span style="font-size:10px;color:var(--mute)">~</span>':''}</div>
+        <div style="display:flex;gap:14px;justify-content:flex-end;margin-top:6px">
+          <button onclick="_g.editar('${it.id}')" style="background:none;border:none;color:var(--blue);font-size:13px;font-weight:600;padding:2px">editar</button>
+          <button onclick="_g.excluir('${it.id}')" style="background:none;border:none;color:var(--guava);font-size:13px;font-weight:600;padding:2px">excluir</button>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:10px;display:flex;justify-content:flex-end">${acaoPag}</div>
+    <div id="ed-${it.id}" class="hidden" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"></div>
+  </div>`;
+}
+G.editar=id=>{
+  const it=state.itens.find(x=>x.id===id), box=document.getElementById("ed-"+id);
+  if(!box) return;
+  if(!box.classList.contains("hidden")){ box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  const campo=(lb,key,val,type="text")=>`<label class="fld">${lb}<input class="inp" type="${type}" ${type==='number'?'inputmode="numeric"':''} value="${escapeAttr(val)}" oninput="_g.campo('${id}','${key}',this.value,${type==='number'})"></label>`;
+  let html=campo("Nome","nome",it.nome);
+  if(it.natureza==="estimada") html+=`<div style="display:flex;gap:8px">${campo("Mínimo (R$)","min",it.min,"number")}${campo("Máximo (R$)","max",it.max,"number")}</div>`;
+  else html+=campo(it.natureza==="parcela"?"Valor da parcela (R$)":"Valor (R$)","valor",it.valor,"number");
+  if(it.natureza==="parcela") html+=campo("Parcelas restantes","restam",it.restam,"number");
+  if(it.natureza==="eventual") html+=campo("Daqui a quantos meses (0=este)","mesIdx",it.mesIdx||0,"number");
+  html+=`<label class="fld">Categoria<select class="inp" onchange="_g.campo('${id}','cat',this.value,false)">${CATEGORIAS.map(c=>`<option ${c===it.cat?'selected':''}>${c}</option>`).join("")}</select></label>`;
+  box.innerHTML=`<div>${html}</div><button class="btnG" style="margin-top:12px;width:100%" onclick="_g.editar('${id}')">fechar edição</button>`;
+};
+G.campo=(id,key,val,num)=>{
+  const patch={[key]:num?(val===""?0:Number(val)):val};
+  if(key==="valor"||key==="restam"){
+    const it=state.itens.find(x=>x.id===id);
+    if(it&&it.natureza==="parcela"){ const valor=key==="valor"?Number(val)||0:(+it.valor||0); const restam=key==="restam"?Number(val)||0:(+it.restam||0); patch.total=valor*restam; }
+  }
+  atualizar(id,patch);
+};
+G.quitarParcela=id=>quitarParcela(id);
+G.togglePago=id=>togglePago(id);
+G.fecharMes=()=>fecharMes();
+
+// ---------- Metas ----------
+function viewMetas(){
+  const p=projecao(), m=p[0];
+  const disponivel=state.renda-m.total, guardadoAlvo=state.renda*state.metaPct;
+  const fechaMeta=disponivel>=guardadoAlvo, ajuste=guardadoAlvo-disponivel;
+  const botoes=[0.10,0.15,0.20,0.30].map(x=>{
+    const on=Math.abs(state.metaPct-x)<0.001;
+    return `<button onclick="_g.setMeta(${x})" style="flex:1;padding:13px 0;border-radius:11px;border:1.5px solid ${on?'var(--green)':'var(--line)'};background:${on?'var(--green)':'#fff'};color:${on?'#fff':'var(--ink)'};font-weight:700;font-size:15px">${(x*100).toFixed(0)}%</button>`;
+  }).join("");
+  const row=(l,v,bold,cor)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;font-weight:${bold?800:400}"><span>${l}</span><span style="color:${cor||'var(--ink)'}">${fmt(v)}</span></div>`;
+  const plano=fechaMeta
+    ? `<li>Programe transferência de ${fmt(guardadoAlvo)} no dia seguinte ao salário.</li><li>Cada parcela que terminar, redirecione pra reserva.</li><li>Monte 3–6 meses de despesa antes da renda variável.</li>`
+    : `<li>Faltam <b>${fmt(ajuste)}</b>/mês. Reduza as estimadas para o piso da faixa.</li><li>Não abra novos parcelamentos (${fmt(m.parcela)}/mês ativos).</li><li>Antecipe eventuais guardando 1/12 por mês.</li>`;
+  return `<div style="padding-top:16px"><h2 style="margin-bottom:12px">Metas & gasto ideal</h2>
+    <div class="card"><div style="font-size:13px;font-weight:700;margin-bottom:10px">Quanto guardar por mês?</div>
+      <div style="display:flex;gap:8px">${botoes}</div>
+      <div style="margin-top:12px;text-align:center;font-size:14px">meta: <b style="color:var(--green)">${fmt(guardadoAlvo)}</b>/mês</div></div>
+    <div class="card">
+      ${row("Renda mensal",state.renda,true,"var(--blue)")}${row("Ordinárias",-m.fixo)}${row("Estimadas (provável)",-m.estimado)}${row("Eventuais do mês",-m.eventual)}${row("Parcelas",-m.parcela,false,"var(--guava)")}
+      <div style="border-top:1.5px solid var(--line);margin:8px 0"></div>
+      ${row("Disponível",disponivel,true,disponivel>=0?"var(--green)":"var(--guava)")}</div>
+    <div class="card" style="background:${fechaMeta?'var(--greenSoft)':'var(--guavaSoft)'};border:1px solid ${fechaMeta?'#BFE0D2':'#F6D2CD'}">
+      <div style="font-size:13px;font-weight:700;color:${fechaMeta?'var(--green)':'var(--guava)'};margin-bottom:6px">${fechaMeta?'🎯 Você fecha a meta':'🛠️ Plano para fechar a meta'}</div>
+      <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">${plano}</ul></div>
+    ${cardHistorico()}
+  </div>`;
+}
+function cardHistorico(){
+  const h=(state.historico||[]).filter(x=>x.fechado);
+  if(!h.length) return `<div class="card" style="text-align:center;color:var(--mute);font-size:12.5px;padding:18px">
+    📅 Nenhum mês fechado ainda. Em <b>Despesas</b>, marque o que pagou e toque em <b>Fechar mês</b> para começar seu histórico — o escore passará a refletir seu comportamento real.</div>`;
+  const linhas=h.slice().reverse().map(x=>{
+    const ad=x.previsto>0?Math.round((x.pago/x.previsto)*100):0;
+    const cor=x.pago>x.renda?"var(--guava)":x.pago>=x.previsto*0.9?"var(--green)":"var(--amber,#E0922F)";
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)">
+      <div><div style="font-weight:700;font-size:13.5px">${x.ym}</div><div style="font-size:11px;color:var(--mute)">previsto ${fmt(x.previsto)}</div></div>
+      <div style="text-align:right"><div style="font-weight:800;font-size:14px;color:${cor}">${fmt(x.pago)}</div><div style="font-size:11px;color:var(--mute)">${ad}% do previsto</div></div>
+    </div>`;
+  }).join("");
+  return `<div class="card">
+    <div style="font-size:12.5px;font-weight:700;color:var(--graphite);margin-bottom:8px">📅 Histórico de meses fechados</div>
+    ${linhas}
+    <div style="font-size:10.5px;color:var(--mute);margin-top:8px;line-height:1.4">Cada mês fechado alimenta o componente real do seu escore.</div>
+  </div>`;
+}
+
+// ---------- Adicionar ----------
+function viewAdd(){
+  const semBackend=!cfg.funcaoUrl;
+  const tabBtn=(k,l)=>`<button onclick="_g.setModo('${k}')" style="flex:1;padding:11px 0;border-radius:11px;border:1.5px solid ${modoAdd===k?'var(--blue)':'var(--line)'};background:${modoAdd===k?'var(--blue)':'#fff'};color:${modoAdd===k?'#fff':'var(--ink)'};font-weight:700;font-size:13.5px">${l}</button>`;
+  let corpo;
+  if(modoAdd==="arquivo"){
+    corpo = semBackend
+      ? `<div class="card" style="text-align:center;padding:24px 16px">
+           <div style="font-size:34px">🔒</div>
+           <div style="font-size:13.5px;margin:10px 0 14px;color:var(--mute)">A leitura de foto e PDF precisa da função de IA. Configure em <b>⚙️ Configurar</b> (leva poucos minutos, tudo pelo celular).</div>
+           <button class="btnP" onclick="_g.setTab('config')">⚙️ Ir para Configurar</button></div>`
+      : `<div class="card" style="text-align:center;padding:24px 16px">
+           <div style="font-size:34px">📑</div>
+           <div style="font-size:13.5px;margin:10px 0 14px;color:var(--mute)">Envie a fatura em <b>PDF</b> ou foto. A IA lê cada linha e classifica.</div>
+           <input id="fileInp" type="file" accept="image/*,application/pdf" capture="environment" style="display:none">
+           <button class="btnP" onclick="document.getElementById('fileInp').click()">📎 Escolher PDF ou foto</button></div>`;
+  } else {
+    const dica = cfg.funcaoUrl ? "a IA classifica automaticamente" : "modo simples (sem IA): use o formato dos exemplos";
+    corpo = `<div class="card">
+      <textarea id="txtInp" rows="4" placeholder="Ex: luz entre 300 e 500; IPVA 2400 em março; sofá em 8x de 300; mercado 950" style="width:100%;border:1.5px solid var(--line);border-radius:11px;padding:12px;font-size:16px;resize:vertical"></textarea>
+      <div style="font-size:11px;color:var(--mute);margin-top:6px">${dica}. Separe vários gastos com ponto e vírgula.</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        ${modoAdd==='voz'?`<button id="vozBtn" class="btnG">🎙️ Falar</button>`:''}
+        <button id="interpBtn" class="btnP" style="flex:1">Interpretar</button></div></div>`;
+  }
+  return `<div style="padding-top:16px"><h2 style="margin-bottom:4px">Adicionar despesa</h2>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">fale, fotografe ou digite — tudo atualiza a projeção</div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">${tabBtn("texto","✍️ Texto")}${tabBtn("voz","🎙️ Voz")}${tabBtn("arquivo","📄 Fatura")}</div>
+    ${corpo}<div id="addStatus"></div><div id="addResult"></div></div>`;
+}
+function ligarAdd(){
+  const ib=document.getElementById("interpBtn");
+  if(ib) ib.onclick=()=>{ const t=(document.getElementById("txtInp").value||"").trim(); if(t) interpretar({texto:t}); };
+  const vb=document.getElementById("vozBtn"); if(vb) vb.onclick=toggleVoz;
+  const fi=document.getElementById("fileInp"); if(fi) fi.onchange=onArquivo;
+}
+function toggleVoz(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ status("Voz indisponível neste navegador. Digite o gasto.",true); return; }
+  if(ouvindo){ rec&&rec.stop(); return; }
+  rec=new SR(); rec.lang="pt-BR"; rec.continuous=true; rec.interimResults=true;
+  rec.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; const el=document.getElementById("txtInp"); if(el) el.value=t; };
+  rec.onend=()=>{ ouvindo=false; const b=document.getElementById("vozBtn"); if(b){b.textContent="🎙️ Falar";b.style.background="#fff";b.style.color="var(--ink)";} };
+  rec.onerror=()=>{ ouvindo=false; status("Não consegui ouvir. Tente digitar.",true); };
+  rec.start(); ouvindo=true;
+  const b=document.getElementById("vozBtn"); if(b){ b.textContent="⏹ Parar"; b.style.background="var(--guava)"; b.style.color="#fff"; }
+}
+function onArquivo(e){
+  const file=e.target.files&&e.target.files[0]; if(!file) return;
+  if(file.size>8*1024*1024){ status("Arquivo muito grande (máx 8MB). Tire a foto com menos resolução.",true); return; }
+  const isPdf=file.type==="application/pdf";
+  const r=new FileReader();
+  r.onload=()=>{ const b64=r.result.split(",")[1]; interpretar(isPdf?{pdfBase64:b64}:{imagemBase64:b64,imagemTipo:file.type||"image/jpeg"}); };
+  r.readAsDataURL(file);
+}
+function status(msg,erro){
+  const box=document.getElementById("addStatus"); if(!box) return;
+  box.innerHTML=!msg?"":erro
+    ?`<div class="banner">${msg}</div>`
+    :`<div class="loadDot">${msg}</div>`;
+}
+
+// ---- interpretação: usa a função de IA se houver; senão, parser local ----
+async function interpretar(payload){
+  if(payload.texto && !cfg.funcaoUrl){
+    const itens=parseLocal(payload.texto);
+    if(itens.length){ mostrarResultado(itens); status("",false); }
+    else status("No modo simples, escreva como nos exemplos: \"luz entre 300 e 500\", \"IPVA 2400 em março\", \"sofá em 8x de 300\". Para texto livre/foto/PDF, ative a IA em ⚙️.",true);
+    return;
+  }
+  if((payload.imagemBase64||payload.pdfBase64) && !cfg.funcaoUrl){
+    status("Configure a IA em ⚙️ para ler foto/PDF.",true); return;
+  }
+  status("🤖 lendo seus gastos…",false);
+  const res=document.getElementById("addResult"); if(res) res.innerHTML="";
+  try{
+    const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.erro||"falha");
+    if(!data.itens||!data.itens.length) throw new Error("nada encontrado");
+    status("",false); mostrarResultado(data.itens);
+  }catch(e){
+    status("Não consegui interpretar. Tente algo simples como \"luz entre 300 e 500\" ou \"TV em 10x de 280\". (Se acabou de configurar a IA, confira a URL em ⚙️.)",true);
+  }
+}
+
+// parser local simples (sem IA) — cobre os formatos dos exemplos
+function parseLocal(texto){
+  const out=[];
+  const partes=texto.split(/[;\n]+/).map(s=>s.trim()).filter(Boolean);
+  for(const parte of partes){
+    const low=parte.toLowerCase();
+    let m;
+    // parcelamento: "8x de 300" / "10x 280"
+    if((m=low.match(/(\d+)\s*x\s*(?:de\s*)?(\d[\d.,]*)/))){
+      const restam=parseInt(m[1],10), valor=num(m[2]);
+      out.push({nome:limpaNome(parte)||"Parcelamento",cat:"Outros",natureza:"parcela",valor,restam,total:valor*restam});
+      continue;
+    }
+    // estimada: "entre 300 e 500"
+    if((m=low.match(/entre\s*(\d[\d.,]*)\s*e\s*(\d[\d.,]*)/))){
+      out.push({nome:limpaNome(parte)||"Despesa estimada",cat:catGuess(low),natureza:"estimada",min:num(m[1]),max:num(m[2])});
+      continue;
+    }
+    // eventual com mês: "IPVA 2400 em março"
+    if((m=low.match(/(\d[\d.,]*)\s*(?:reais)?\s*(?:em|no|na)\s+([a-zç]+)/))){
+      const mesIdx=mesParaIdx(m[2]);
+      if(mesIdx!=null){ out.push({nome:limpaNome(parte)||"Despesa",cat:catGuess(low),natureza:"eventual",valor:num(m[1]),mesIdx}); continue; }
+    }
+    // valor simples → ordinária
+    if((m=low.match(/(\d[\d.,]+|\d+)/))){
+      out.push({nome:limpaNome(parte)||"Despesa",cat:catGuess(low),natureza:"ordinaria",valor:num(m[1])});
+    }
+  }
+  return out;
+}
+function num(s){ s=String(s).replace(/\./g,"").replace(",","."); const n=parseFloat(s); return isNaN(n)?0:n; }
+function limpaNome(s){
+  let t=s
+    .replace(/r\$\s*/gi,"")
+    .replace(/\d+\s*x\s*(?:de\s*)?\d[\d.,]*/gi,"")   // "8x de 300"
+    .replace(/entre\s*\d[\d.,]*\s*e\s*\d[\d.,]*/gi,"") // "entre 300 e 500"
+    .replace(/\bem\s+(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/gi,"")
+    .replace(/\d[\d.,]*/g,"")                          // números soltos
+    .replace(/\breais\b/gi,"")
+    .replace(/\s+/g," ").replace(/[\s,;:-]+$/,"")
+    .replace(/\s+(em|de|da|do|na|no|para|pra|por)$/i,"").trim();
+  return t.replace(/^./,c=>c.toUpperCase());
+}
+function catGuess(s){
+  if(/luz|energia|água|agua|conta|internet|telefone/.test(s)) return "Contas";
+  if(/mercado|supermerc|feira/.test(s)) return "Mercado";
+  if(/ipva|iptu|imposto/.test(s)) return "Impostos";
+  if(/restaurante|delivery|ifood|lanche/.test(s)) return "Restaurante";
+  if(/gasolina|combust|uber|transporte|ônibus|onibus/.test(s)) return "Transporte";
+  if(/escola|curso|faculdade/.test(s)) return "Educação";
+  if(/médico|medico|remédio|remedio|saúde|saude|plano/.test(s)) return "Saúde";
+  if(/aluguel|financ|condom/.test(s)) return "Moradia";
+  return "Outros";
+}
+function mesParaIdx(palavra){
+  const map={janeiro:0,fevereiro:1,março:2,marco:2,abril:3,maio:4,junho:5,julho:6,agosto:7,setembro:8,outubro:9,novembro:10,dezembro:11};
+  const alvo=map[palavra]; if(alvo==null) return null;
+  const atual=new Date().getMonth();
+  return (alvo-atual+12)%12;
+}
+
+function mostrarResultado(itens){
+  resultadoTmp=itens;
+  const linhas=itens.map((it,i)=>{
+    const detalhe=`${it.cat||"Outros"} · ${NAT_LABEL[it.natureza]||it.natureza}`
+      +(it.natureza==="estimada"&&it.min!=null?` · ${fmt(+it.min)}–${fmt(+it.max)}`:"")
+      +(it.natureza==="parcela"?` · ${it.restam}x de ${fmt(+it.valor)}`:"")
+      +(it.natureza==="eventual"?` · ${MESES[(new Date().getMonth()+(+it.mesIdx||0))%12]}`:"");
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);gap:8px">
+      <div style="min-width:0"><div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:2px;background:${NAT_COR[it.natureza]||'var(--graphite)'};flex:none"></span>${it.nome||"Despesa"}</div>
+      <div style="font-size:11px;color:var(--mute);margin-left:13px">${detalhe}</div></div>
+      <button class="btnP" style="padding:9px 16px;font-size:13px;min-height:auto;flex:none" onclick="_g.incluir(${i})">incluir</button></div>`;
+  }).join("");
+  const res=document.getElementById("addResult"); if(!res) return;
+  res.innerHTML=`<div class="card"><div style="font-size:13px;font-weight:700;margin-bottom:6px">${itens.length} ${itens.length===1?'lançamento':'lançamentos'} — confira e inclua:</div>${linhas}
+    <button class="btnG" style="width:100%;margin-top:12px" onclick="_g.incluirTodos()">incluir todos</button></div>`;
+}
+G.incluir=i=>{ const it=resultadoTmp&&resultadoTmp[i]; if(!it) return; lancar(normaliza(it)); resultadoTmp.splice(i,1); if(resultadoTmp.length) mostrarResultado(resultadoTmp); else { document.getElementById("addResult").innerHTML=""; status("Incluído ✓ — veja em Despesas.",false); } };
+G.incluirTodos=()=>{ if(!resultadoTmp) return; resultadoTmp.forEach(it=>lancar(normaliza(it))); resultadoTmp=null; document.getElementById("addResult").innerHTML=""; status("Tudo incluído ✓",false); };
+function normaliza(it){
+  const base={nome:it.nome||"Despesa",cat:it.cat||"Outros",natureza:it.natureza||"eventual"};
+  if(it.natureza==="estimada") return {...base,min:Number(it.min)||0,max:Number(it.max)||0};
+  if(it.natureza==="parcela"){ const valor=Number(it.valor)||0, restam=Number(it.restam)||1; return {...base,valor,restam,total:valor*restam}; }
+  if(it.natureza==="eventual") return {...base,valor:Number(it.valor)||0,mesIdx:Number(it.mesIdx)||0};
+  return {...base,valor:Number(it.valor)||0};
+}
+
+// ---------- Saiba Mais (explicação visual executiva) ----------
+function viewSaiba(){
+  const passo=(n,cor,tit,txt)=>`<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px">
+    <div style="width:30px;height:30px;border-radius:9px;background:${cor};color:#fff;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;flex:none">${n}</div>
+    <div><div style="font-weight:700;font-size:14px;margin-bottom:2px">${tit}</div><div style="font-size:12.5px;color:var(--mute);line-height:1.5">${txt}</div></div>
+  </div>`;
+  const chip=(ic,tit,txt,cor)=>`<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px">
+    <div style="font-size:20px">${ic}</div>
+    <div style="font-weight:700;font-size:13.5px;color:${cor};margin-top:5px">${tit}</div>
+    <div style="font-size:11.5px;color:var(--mute);line-height:1.45;margin-top:3px">${txt}</div></div>`;
+
+  return `<div style="padding-top:16px">
+    <h2 style="margin-bottom:4px">Saiba mais</h2>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">como o Guava funciona, em 4 partes</div>
+
+    <!-- 1. Visão geral -->
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">1 · O QUE O GUAVA FAZ</div>
+      <div style="font-size:13px;color:var(--ink);line-height:1.6;margin:8px 0 4px">
+        O Guava transforma seus gastos numa <b>projeção de 12 a 18 meses</b>. Em vez de olhar só o mês atual, você enxerga o futuro do orçamento — principalmente o peso dos <b>parcelamentos</b>, que escondem o custo real de uma compra.
+      </div>
+      <div class="grid2" style="margin-top:10px;gap:10px">
+        ${chip("📊","Projeção","vê o saldo de cada mês à frente","var(--blue)")}
+        ${chip("💳","Parcelas","destaca o que está comprometido","var(--guava)")}
+        ${chip("🎯","Metas","define quanto guardar por mês","var(--green)")}
+        ${chip("🧮","Escore","mede a saúde do orçamento","var(--graphite)")}
+      </div>
+    </div>
+
+    <!-- 2. As 4 naturezas de despesa -->
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">2 · COMO CLASSIFICAR OS GASTOS</div>
+      <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin:8px 0 12px">Cada despesa tem um comportamento diferente no tempo. O app separa em quatro tipos:</div>
+      ${[["Ordinária","#334155","recorrente e previsível (aluguel, escola). Repete todo mês."],
+         ["Estimada","#065F46","recorrente mas variável (luz, mercado). Você dá uma faixa mín–máx; o app usa a média."],
+         ["Eventual","#1E3A8A","cai num mês específico (IPVA, presente). Aparece só naquele mês."],
+         ["Parcela","#FA8072","parcelamento do cartão. Some da projeção quando a última parcela vence."]]
+        .map(([t,c,d])=>`<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+          <span style="width:10px;height:10px;border-radius:3px;background:${c};margin-top:4px;flex:none"></span>
+          <div><b style="font-size:13.5px">${t}</b><div style="font-size:12px;color:var(--mute);line-height:1.45">${d}</div></div></div>`).join("")}
+    </div>
+
+    <!-- 3. IA embarcada -->
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">3 · A IA EMBARCADA</div>
+      <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin:8px 0 12px">Você não precisa preencher formulários. Lança gastos de três jeitos, e a IA organiza:</div>
+      ${passo("✍️","var(--graphite)","Texto","Escreve \"luz entre 300 e 500; sofá em 8x de 300\" e o app separa cada item.")}
+      ${passo("🎙️","var(--blue)","Voz","Fala os gastos; o próprio celular transcreve e a IA interpreta.")}
+      ${passo("📄","var(--guava)","Foto ou PDF da fatura","A IA lê cada linha da fatura, agrupa parcelamentos e classifica tudo.")}
+      <div style="background:var(--blueSoft);border-radius:10px;padding:12px;margin-top:6px">
+        <div style="font-size:12px;color:var(--graphite);line-height:1.5">
+          🔒 <b>Onde a IA roda:</b> texto e voz funcionam direto no app. Foto e PDF passam por uma função sua na nuvem, que guarda a chave da IA com segurança — ela <b>nunca</b> fica exposta no celular. Sem essa função, texto e voz seguem funcionando num modo simples por regras.
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Modelo de escore -->
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">4 · O ESCORE DE COMPORTAMENTO</div>
+      <div style="font-size:12.5px;color:var(--ink);line-height:1.6;margin:8px 0 10px">
+        Uma nota de <b>0 a 100</b> sobre a saúde do seu orçamento projetado. O alvo é o <b>GAP</b>: meses em que as despesas previstas superam a receita. Quanto menos GAP, maior a nota.
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:12px">
+        ${[["0–39","Crítico","#FA8072"],["40–64","Atenção","#E0922F"],["65–84","Saudável","#3E8E5A"],["85–100","Excelente","#065F46"]]
+          .map(([r,n,c])=>`<div style="flex:1;text-align:center;background:${c};color:#fff;border-radius:9px;padding:8px 2px">
+            <div style="font-size:11px;font-weight:800">${n}</div><div style="font-size:9px;opacity:.85">${r}</div></div>`).join("")}
+      </div>
+      <div style="font-size:12px;color:var(--mute);line-height:1.5;margin-bottom:8px">A nota combina quatro fatores:</div>
+      ${[["Sem déficit (GAP)","50%","peso maior — é o alvo central"],
+         ["Folga de caixa","18%","quanto sobra em média por mês"],
+         ["Parcelas sob controle","18%","ideal manter abaixo de 30% da renda"],
+         ["Meta de poupança","14%","meses em que você bate a meta de guardar"]]
+        .map(([t,p,d])=>`<div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)">
+          <span style="font-size:13px;font-weight:600">${t}</span><span style="font-size:13px;font-weight:800;color:var(--blue)">${p}</span></div>
+          <div style="font-size:11px;color:var(--mute);margin:-2px 0 4px">${d}</div>`).join("")}
+      <div style="background:var(--greenSoft);border-radius:10px;padding:12px;margin-top:10px">
+        <div style="font-size:12px;color:var(--graphite);line-height:1.5">
+          💡 <b>O diferencial:</b> o escore também conta o <b>"quase-GAP"</b> — meses em que sobra fica abaixo da meta. Assim ele <b>avisa antes</b> de você entrar no vermelho, não depois.
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Gerenciar -->
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">5 · GERENCIAR O APP</div>
+      <div style="margin-top:10px">
+        ${passo("＋","var(--green)","Adicionar","aba ➕ — lança gastos por texto, voz, foto ou PDF.")}
+        ${passo("✎","var(--blue)","Editar / excluir","aba 📂 Despesas — toque em editar ou excluir em cada item.")}
+        ${passo("✓","var(--green)","Marcar pago","em cada despesa, marque o que já pagou. Nas parcelas, o botão verde abate uma do total.")}
+        ${passo("📅","var(--graphite)","Fechar mês","em Despesas, registra previsto × pago no histórico e faz o escore considerar seu comportamento real.")}
+        ${passo("⚙","var(--graphite)","Configurar","ativa a IA (foto/PDF) e a sincronização entre aparelhos.")}
+        ${passo("⬇","var(--mute)","Backup","⚙️ Configurar → exporta/importa seus dados num arquivo.")}
+      </div>
+      <div style="font-size:11.5px;color:var(--mute);line-height:1.5;margin-top:6px;border-top:1px solid var(--line);padding-top:10px">
+        Seus dados ficam salvos no aparelho. Se ativar a sincronização, aparecem também nos outros celulares conectados à mesma conta.
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:4px 0 8px">
+      <button class="btnP" style="width:100%" onclick="_g.setTab('config')">⚙️ Ir para Configurar</button>
+    </div>
+  </div>`;
+}
+
+// ---------- Configuração (dentro do app) ----------
+function viewConfig(){
+  const fbOk=!!cfg.firebase, fnOk=!!cfg.funcaoUrl;
+  const fbJson = cfg.firebase ? JSON.stringify(cfg.firebase,null,2) : "";
+  return `<div style="padding-top:16px"><h2 style="margin-bottom:4px">Configurar</h2>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">tudo aqui é feito pelo celular. Os dados ficam salvos neste aparelho.</div>
+
+    <div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:4px">1 · Sincronizar entre aparelhos ${fbOk?'<span style="color:var(--green)">✓</span>':''}</div>
+      <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin-bottom:8px">Opcional. Cole aqui o bloco de configuração do Firebase (aquele que começa com <code>apiKey</code>). Sem isso, o app funciona só neste aparelho.</div>
+      <textarea id="cfgFb" rows="7" class="inp" placeholder='{
+  "apiKey": "...",
+  "authDomain": "...",
+  "projectId": "...",
+  "appId": "..."
+}' style="font-family:ui-monospace,monospace;font-size:13px">${escapeAttr(fbJson)}</textarea>
+      <button id="salvarFb" class="btnP" style="width:100%;margin-top:10px">Salvar e conectar</button>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:4px">2 · Ativar IA (foto e PDF) ${fnOk?'<span style="color:var(--green)">✓</span>':''}</div>
+      <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin-bottom:8px">Opcional. Cole a URL da função publicada no Firebase. Sem isso, texto e voz funcionam no modo simples.</div>
+      <input id="cfgFn" class="inp" inputmode="url" placeholder="https://southamerica-east1-...cloudfunctions.net/interpretarDespesa" value="${escapeAttr(cfg.funcaoUrl)}">
+      <button id="salvarFn" class="btnP" style="width:100%;margin-top:10px">Salvar URL</button>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:8px">Dados</div>
+      <button id="exportar" class="btnG" style="width:100%;margin-bottom:8px">⬇️ Exportar meus dados (backup)</button>
+      <button id="importarBtn" class="btnG" style="width:100%;margin-bottom:8px">⬆️ Importar backup</button>
+      <input id="importarInp" type="file" accept="application/json" style="display:none">
+      <button id="resetar" class="btnG" style="width:100%;color:var(--guava);border-color:#F6D2CD">🗑️ Apagar tudo e recomeçar</button>
+    </div>
+
+    <div class="card" style="background:var(--blueSoft);border-color:#C7D2EA">
+      <div style="font-weight:700;font-size:14px;margin-bottom:6px">Como publicar a função pelo celular</div>
+      <ol style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.7;color:var(--graphite)">
+        <li>Abra <b>console.firebase.google.com</b> no navegador do celular e entre no seu projeto.</li>
+        <li>Crie o banco (Firestore) e ative o login <b>Anônimo</b> em Authentication.</li>
+        <li>Em <b>Functions</b>, siga para criar a função <code>interpretarDespesa</code> e cole o código fornecido.</li>
+        <li>Guarde a chave da Anthropic no Secret Manager quando solicitado.</li>
+        <li>Copie a URL gerada e cole no campo 2 acima.</li>
+      </ol>
+      <div style="font-size:11.5px;color:var(--mute);margin-top:8px">O guia detalhado acompanha a entrega.</div>
+    </div>
+  </div>`;
+}
+function ligarConfig(){
+  document.getElementById("salvarFb").onclick=()=>{
+    const raw=(document.getElementById("cfgFb").value||"").trim();
+    if(!raw){ cfg.firebase=null; salvarCfg(); banner("Firebase removido."); render(); return; }
+    try{
+      const obj=JSON.parse(raw.replace(/^const\s+firebaseConfig\s*=\s*/,"").replace(/;?\s*$/,""));
+      if(!obj.apiKey||!obj.projectId) throw new Error("faltam campos");
+      cfg.firebase=obj; salvarCfg();
+      alert("Firebase salvo. O app vai recarregar para conectar.");
+      location.reload();
+    }catch(e){ alert("Não consegui ler. Cole o objeto JSON completo, com apiKey e projectId."); }
+  };
+  document.getElementById("salvarFn").onclick=()=>{
+    const u=(document.getElementById("cfgFn").value||"").trim();
+    if(u && !/^https:\/\//.test(u)){ alert("A URL deve começar com https://"); return; }
+    cfg.funcaoUrl=u; salvarCfg(); alert(u?"URL salva. Foto e PDF ativados.":"URL removida."); render();
+  };
+  document.getElementById("exportar").onclick=()=>{
+    const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+    a.download="guava-backup-"+new Date().toISOString().slice(0,10)+".json"; a.click();
+  };
+  document.getElementById("importarBtn").onclick=()=>document.getElementById("importarInp").click();
+  document.getElementById("importarInp").onchange=e=>{
+    const f=e.target.files&&e.target.files[0]; if(!f) return;
+    const r=new FileReader(); r.onload=()=>{ try{ const obj=JSON.parse(r.result); state={...state,...obj}; salvar(); alert("Backup importado ✓"); render(); }catch{ alert("Arquivo inválido."); } };
+    r.readAsText(f);
+  };
+  document.getElementById("resetar").onclick=()=>{
+    if(!confirm("Apagar todas as despesas e recomeçar com os exemplos?")) return;
+    state={renda:20000,metaPct:0.20,horizonte:12,itens:seed.slice()}; salvar(); render();
+  };
+}
+
+// ---------- renda ----------
+document.getElementById("rendaBtn").onclick=()=>{
+  const novo=prompt("Renda mensal (R$):",state.renda);
+  if(novo!==null){ const n=Number(String(novo).replace(/[^\d]/g,"")); if(n>0){ state.renda=n; salvar(); } }
+};
+
+// ---------- boot ----------
+carregarLocal();
+render();
+iniciarFirebase();
+</script>
+</body>
+</html>
