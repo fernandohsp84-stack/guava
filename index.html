@@ -11,42 +11,54 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
   :root{
-    --bg:#F8FAFC; --card:#fff; --blue:#1E3A8A; --blueSoft:#E5EAF6;
-    --green:#065F46; --greenSoft:#E2EFEA; --graphite:#334155; --graphiteSoft:#E8ECF1;
-    --guava:#FA8072; --guavaSoft:#FDECEA; --line:#E2E8F0; --mute:#64748B; --ink:#0F172A;
+    /* Paleta oficial Guava (spec técnica) */
+    --navy:#0A2540; --cyan:#639FAB; --emerald:#004B49; --ggreen:#00C49F;
+    --gpink:#FF6584; --legend:#516B73;
+    --bg:#0A2540; --card:#fff; --ink:#0A2540; --mute:#516B73; --line:#E2E8F0;
+    /* aliases p/ compatibilidade com código existente */
+    --blue:#0A2540; --blueSoft:#E6EEF2; --green:#004B49; --greenSoft:#E0F2EF;
+    --graphite:#0A2540; --graphiteSoft:#E8EEF1; --guava:#FF6584; --guavaSoft:#FFEAEF;
+    --amber:#E0922F;
+    --grad-dash:linear-gradient(160deg,#0E3A3A 0%,#0A2540 55%,#06203A 100%);
+    --glass:rgba(255,255,255,0.85);
   }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   html{-webkit-text-size-adjust:100%}
-  body{background:var(--bg);color:var(--ink);font-family:'Inter',-apple-system,system-ui,sans-serif;padding-bottom:calc(76px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased}
+  body{background:var(--grad-dash);background-attachment:fixed;color:var(--ink);font-family:'Inter',-apple-system,system-ui,sans-serif;padding-bottom:calc(80px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased}
   button,input,select,textarea{font-family:inherit;font-size:16px}
   button{cursor:pointer}
   button:active{opacity:.7}
   main{max-width:600px;margin:0 auto;padding:0 14px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;animation:pop .25s ease both}
-  @keyframes pop{0%{transform:translateY(6px);opacity:0}100%{transform:none;opacity:1}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px;animation:pop .25s ease both;box-shadow:0 6px 20px rgba(10,37,64,.06)}
+  @keyframes pop{0%{transform:translateY(8px);opacity:0}100%{transform:none;opacity:1}}
   @media(prefers-reduced-motion:reduce){.card{animation:none}}
-  h2{font-size:20px;font-weight:800;letter-spacing:-.3px}
+  h2{font-size:20px;font-weight:800;letter-spacing:-.3px;color:#fff}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .btnP{background:var(--blue);color:#fff;border:none;border-radius:12px;padding:14px 18px;font-size:15px;font-weight:700;min-height:50px}
-  .btnG{background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:14px 16px;font-size:15px;font-weight:700;min-height:50px}
-  .inp{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:12px;font-size:16px;margin-top:4px;background:#fff}
+  .btnP{background:var(--emerald);color:#fff;border:none;border-radius:14px;padding:14px 18px;font-size:15px;font-weight:700;min-height:50px}
+  .btnG{background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;font-size:15px;font-weight:700;min-height:50px}
+  .inp{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:12px;font-size:16px;margin-top:4px;background:#fff}
   .pill{padding:9px 14px;border-radius:20px;white-space:nowrap;font-size:13px;font-weight:600;border:1.5px solid var(--line);background:#fff;color:var(--mute);min-height:38px}
-  nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:50}
-  nav button{flex:1;background:none;border:none;padding:8px 0 10px;color:var(--mute);min-width:0}
-  nav button.on{color:var(--blue)}
-  nav .ic{font-size:19px;line-height:1}
+  nav{position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid rgba(255,255,255,.5);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:50;box-shadow:0 -4px 20px rgba(10,37,64,.08)}
+  nav button{flex:1;background:none;border:none;padding:9px 0 11px;color:var(--mute);min-width:0;transition:color .2s}
+  nav button.on{color:var(--emerald)}
+  nav .ic{font-size:20px;line-height:1;transition:transform .2s}
+  nav button.on .ic{transform:scale(1.15)}
   nav .lb{font-size:9.5px;font-weight:500;margin-top:3px}
   nav button.on .lb{font-weight:700}
-  header{background:#fff;border-bottom:1px solid var(--line);padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top))}
+  /* botão central + em rosa */
+  nav button.plus .ic{background:var(--gpink);color:#fff;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:-12px auto 0;box-shadow:0 6px 16px rgba(255,101,132,.45);font-size:26px}
+  nav button.plus.on .ic{transform:scale(1.05)}
+  nav button.plus.on{color:var(--gpink)}
+  header{background:transparent;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top))}
   .hgrid{max-width:600px;margin:0 auto;display:flex;justify-content:space-between;align-items:center}
   .barTrack{height:14px;border-radius:8px;background:var(--graphiteSoft);overflow:hidden;position:relative;margin-top:10px}
-  .toggle{display:flex;background:var(--graphiteSoft);border-radius:12px;padding:3px}
-  .toggle button{padding:9px 18px;border-radius:9px;border:none;font-size:14px;font-weight:700;background:transparent;color:var(--mute)}
-  .toggle button.on{background:var(--blue);color:#fff}
+  .toggle{display:flex;background:rgba(255,255,255,.15);border-radius:12px;padding:3px}
+  .toggle button{padding:9px 18px;border-radius:9px;border:none;font-size:14px;font-weight:700;background:transparent;color:rgba(255,255,255,.7)}
+  .toggle button.on{background:var(--ggreen);color:#063}
   .hidden{display:none}
   .loadDot{text-align:center;color:var(--mute);font-size:14px;padding:16px}
   table{width:100%;border-collapse:collapse}
-  .saveTag{position:fixed;top:calc(8px + env(safe-area-inset-top));right:12px;background:var(--green);color:#fff;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;z-index:60;opacity:0;transition:opacity .3s}
+  .saveTag{position:fixed;top:calc(8px + env(safe-area-inset-top));right:12px;background:var(--ggreen);color:#063;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;z-index:60;opacity:0;transition:opacity .3s}
   .saveTag.show{opacity:.95}
   .banner{background:var(--guavaSoft);border:1px solid #F6D2CD;color:#B23B2E;font-size:13px;padding:10px 12px;border-radius:10px;margin:12px 0;line-height:1.5}
   label.fld{display:block;font-size:12px;color:var(--mute);font-weight:600;margin-top:10px}
@@ -56,24 +68,21 @@
 <div id="saveTag" class="saveTag">salvo ✓</div>
 
 <header>
-  <div class="hgrid" style="position:relative;justify-content:center">
+  <div class="hgrid" style="position:relative">
     <div style="display:flex;align-items:center;gap:9px">
       <svg width="30" height="32" viewBox="0 0 30 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Guava">
-        <!-- folha -->
-        <path d="M16.4 5.2c1.6-2.1 4.1-3 6.2-2.7-.2 2.1-1.5 4.2-3.6 5.1-1 .4-2 .5-2.9.3" fill="#8BC79B"/>
-        <!-- corpo da goiaba -->
-        <path d="M15 7.3c-.7 0-1.3.3-1.9.7C8.7 8.7 5 12.9 5 18.3 5 24.2 9.5 29 15 29s10-4.8 10-10.7c0-5.4-3.7-9.6-8.1-10.3-.6-.4-1.2-.7-1.9-.7z" fill="#9FD3AC"/>
-        <!-- realce suave -->
-        <ellipse cx="11.3" cy="16" rx="2.4" ry="3.4" fill="#B6E0BF" opacity=".6"/>
+        <path d="M16.4 5.2c1.6-2.1 4.1-3 6.2-2.7-.2 2.1-1.5 4.2-3.6 5.1-1 .4-2 .5-2.9.3" fill="#00C49F"/>
+        <path d="M15 7.3c-.7 0-1.3.3-1.9.7C8.7 8.7 5 12.9 5 18.3 5 24.2 9.5 29 15 29s10-4.8 10-10.7c0-5.4-3.7-9.6-8.1-10.3-.6-.4-1.2-.7-1.9-.7z" fill="#3FD9BC"/>
+        <ellipse cx="11.3" cy="16" rx="2.4" ry="3.4" fill="#7DE8D2" opacity=".6"/>
       </svg>
-      <span style="font-size:25px;font-weight:800;letter-spacing:-.6px;color:#1F2937">Guava</span>
+      <span style="font-size:25px;font-weight:800;letter-spacing:-.6px;color:#fff">Guava</span>
     </div>
-    <button id="rendaBtn" style="position:absolute;right:0;text-align:right;background:none;border:none">
-      <div style="font-size:9.5px;color:var(--mute)">renda</div>
-      <div id="rendaVal" style="font-size:14px;font-weight:800;color:var(--blue)">R$ 0 ✏️</div>
+    <button id="rendaBtn" style="text-align:right;background:none;border:none">
+      <div style="font-size:9.5px;color:var(--cyan)">renda mensal</div>
+      <div id="rendaVal" style="font-size:16px;font-weight:800;color:#fff">R$ 0 <span style="color:var(--gpink)">✏️</span></div>
     </button>
   </div>
-  <div id="hsub" style="font-size:11px;color:var(--mute);text-align:center;margin-top:3px">gestão familiar</div>
+  <div id="hsub" style="font-size:11px;color:var(--cyan);margin-top:3px">gestão familiar</div>
 </header>
 
 <main id="app"></main>
@@ -324,38 +333,32 @@ function calcularEscore(p, renda, metaPct){
 
 // cartão do escore na home
 function cardEscore(esc){
-  const ang=esc.score*3.6; // 0-360
-  const anel=`conic-gradient(${esc.faixa.cor} ${ang}deg, var(--graphiteSoft) ${ang}deg)`;
   const gapTxt=esc.gapMeses>0
-    ? `<span style="color:var(--guava);font-weight:700">${esc.gapMeses} ${esc.gapMeses===1?'mês':'meses'}</span> com déficit (GAP de ${fmt(esc.gapTotal)})`
+    ? `<span style="color:var(--gpink);font-weight:700">${esc.gapMeses} ${esc.gapMeses===1?'mês':'meses'}</span> com déficit (GAP de ${fmt(esc.gapTotal)})`
     : esc.quaseGap>0
-      ? `<span style="color:var(--amber,#E0922F);font-weight:700">${esc.quaseGap} ${esc.quaseGap===1?'mês fica':'meses ficam'}</span> com folga abaixo da meta`
-      : `<span style="color:var(--green);font-weight:700">nenhum mês</span> com déficit projetado`;
+      ? `<span style="color:var(--amber);font-weight:700">${esc.quaseGap} ${esc.quaseGap===1?'mês fica':'meses ficam'}</span> com folga abaixo da meta`
+      : `<span style="color:var(--emerald);font-weight:700">nenhum mês</span> com déficit projetado`;
+  const corFator=f=>f.frac>=0.85?"var(--ggreen)":f.frac>=0.5?"var(--cyan)":"var(--gpink)";
   return `<div class="card">
-    <div style="display:flex;align-items:center;gap:16px">
-      <div style="width:84px;height:84px;border-radius:50%;background:${anel};display:flex;align-items:center;justify-content:center;flex:none">
-        <div style="width:64px;height:64px;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center">
-          <span style="font-size:22px;font-weight:800;color:${esc.faixa.cor};line-height:1">${esc.score}</span>
-          <span style="font-size:8.5px;color:var(--mute)">de 100</span>
-        </div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">ESCORE DE COMPORTAMENTO</div>
+        <div style="font-size:17px;font-weight:800;color:var(--emerald);margin:2px 0 3px">${esc.faixa.nome}</div>
       </div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:11px;font-weight:700;color:var(--graphite);letter-spacing:.3px">ESCORE DE COMPORTAMENTO</div>
-        <div style="font-size:17px;font-weight:800;color:${esc.faixa.cor};margin:2px 0 3px">${esc.faixa.nome}</div>
-        <div style="font-size:12px;color:var(--mute);line-height:1.4">${gapTxt}</div>
-      </div>
+      <div style="text-align:right"><span style="font-size:26px;font-weight:800;color:var(--emerald);line-height:1">${esc.score}</span><span style="font-size:11px;color:var(--mute)">/100</span></div>
     </div>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">
+    <div style="font-size:12px;color:var(--mute);line-height:1.4;margin-bottom:10px">${gapTxt}</div>
+    <div style="display:flex;flex-direction:column;gap:7px">
       ${esc.fatores.map(f=>`<div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:11px;color:var(--mute);width:120px;flex:none">${f.nome}</span>
-        <div style="flex:1;height:6px;border-radius:4px;background:var(--graphiteSoft);overflow:hidden">
-          <div style="width:${Math.round(f.frac*100)}%;height:100%;background:${esc.faixa.cor};opacity:.85"></div></div>
+        <div style="flex:1;height:7px;border-radius:4px;background:#E8EEF1;overflow:hidden">
+          <div style="width:${Math.round(f.frac*100)}%;height:100%;background:${corFator(f)}"></div></div>
         <span style="font-size:10.5px;color:var(--mute);width:30px;text-align:right">${Math.round(f.frac*100)}%</span>
       </div>`).join("")}
     </div>
     ${esc.scoreRetro!=null?`<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-size:11.5px">
-      <span style="color:var(--mute)">📈 projeção futura <b style="color:var(--ink)">${esc.scoreFuturo}</b></span>
-      <span style="color:var(--mute)">📅 histórico real <b style="color:var(--ink)">${esc.scoreRetro}</b> · ${esc.mesesFechados} ${esc.mesesFechados===1?'mês':'meses'}</span>
+      <span style="color:var(--mute)">📈 projeção <b style="color:var(--navy)">${esc.scoreFuturo}</b></span>
+      <span style="color:var(--mute)">📅 histórico real <b style="color:var(--navy)">${esc.scoreRetro}</b> · ${esc.mesesFechados} ${esc.mesesFechados===1?'mês':'meses'}</span>
     </div>`:""}
     <div style="font-size:10.5px;color:var(--mute);margin-top:10px;line-height:1.4">O alvo do escore é zerar o GAP — meses em que as despesas projetadas superam a receita.${esc.scoreRetro!=null?` Agora ele também pesa seu histórico real (${Math.round(esc.pesoRetro*100)}%).`:""}</div>
   </div>`;
@@ -457,7 +460,7 @@ const app=document.getElementById("app");
 const G={};
 window._g=G;
 G.setTab=t=>{ tab=t; modoAdd="texto"; render(); window.scrollTo(0,0); };
-G.setHor=h=>{ state.horizonte=h; salvar(); };
+G.setHor=h=>{ state.horizonte=h; salvar(); render(); window.scrollTo(0,0); };
 G.setMeta=x=>{ state.metaPct=x; salvar(); };
 G.setFiltro=g=>{ filtroDesp=g; render(); };
 G.setModo=k=>{ modoAdd=k; ouvindo=false; render(); };
@@ -476,10 +479,11 @@ function render(){
   else if(tab==="saiba") app.innerHTML=viewSaiba();
 }
 function renderNav(){
-  const items=[["inicio","⊞","Início"],["proj","📊","Projeção"],["despesas","📂","Despesas"],["metas","🎯","Metas"],["add","➕","Adicionar"],["saiba","❓","Saiba+"]];
-  document.getElementById("nav").innerHTML=items.map(([k,ic,l])=>
-    `<button class="${tab===k?'on':''}" onclick="_g.setTab('${k}')"><div class="ic">${ic}</div><div class="lb">${l}</div></button>`
-  ).join("");
+  const items=[["inicio","⌂","Início"],["proj","◔","Projeção"],["despesas","▤","Despesas"],["metas","◎","Metas"],["add","+","Adicionar"],["saiba","?","Saiba+"]];
+  document.getElementById("nav").innerHTML=items.map(([k,ic,l])=>{
+    const cls=(k==="add"?"plus ":"")+(tab===k?"on":"");
+    return `<button class="${cls.trim()}" onclick="_g.setTab('${k}')"><div class="ic">${ic}</div><div class="lb">${l}</div></button>`;
+  }).join("");
 }
 
 // ---------- Início ----------
@@ -488,54 +492,129 @@ function viewInicio(){
   const disponivel=state.renda-m.total, guardadoAlvo=state.renda*state.metaPct;
   const fechaMeta=disponivel>=guardadoAlvo;
   const pctGasto=Math.min(m.total/Math.max(state.renda,1),1), proximoTeto=pctGasto>0.85;
-  const barCor=proximoTeto?"var(--guava)":pctGasto>(m.ideal/Math.max(state.renda,1))?"var(--graphite)":"var(--green)";
   const semBackend=!cfg.funcaoUrl;
   const esc=calcularEscore(p,state.renda,state.metaPct);
-  const rend=(state.metaPct*100); // exibe a meta como % "rendimento/guardado"
+  const rend=(state.metaPct*100);
   return `<div id="bannerSlot">${bannerMsg?`<div class="banner">${bannerMsg}</div>`:""}</div>
-  <div style="padding-top:16px">
+  <div style="padding-top:6px">
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:2px 0 12px">
+      <span style="font-size:11.5px;font-weight:700;color:${state.horizonte===12?'#fff':'var(--cyan)'}">12 meses</span>
+      <button onclick="_g.setHor(${state.horizonte===12?18:12})" aria-label="alternar horizonte" style="width:48px;height:27px;border-radius:20px;border:none;background:${state.horizonte===18?'var(--ggreen)':'rgba(255,255,255,.25)'};position:relative;padding:0;transition:background .2s">
+        <span style="position:absolute;top:3px;left:${state.horizonte===18?'24px':'3px'};width:21px;height:21px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></span>
+      </button>
+      <span style="font-size:11.5px;font-weight:700;color:${state.horizonte===18?'#fff':'var(--cyan)'}">18 meses</span>
+    </div>
+    ${cardVisaoFuturo(p,esc)}
     <div class="grid2">
-      <div class="card" style="background:var(--blue);padding:16px 14px;border:none">
-        <div style="font-size:10.5px;font-weight:700;color:#C7D2EA;letter-spacing:.4px">DISPONÍVEL P/ GASTAR</div>
-        <div style="font-size:24px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(disponivel)}</div>
-        <div style="font-size:11px;color:#C7D2EA;margin-top:4px">de ${fmt(state.renda)} de renda</div>
+      <div class="card" style="background:var(--navy);padding:16px 14px;border:none;color:#fff">
+        <div style="font-size:10.5px;font-weight:700;color:var(--cyan);letter-spacing:.4px">DISPONÍVEL P/ GASTAR</div>
+        <div style="font-size:23px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(disponivel)}</div>
+        <div style="font-size:11px;color:var(--cyan);margin-top:4px;opacity:.85">de ${fmt(state.renda)} de renda</div>
       </div>
-      <div class="card" style="background:var(--green);padding:16px 14px;border:none">
-        <div style="font-size:10.5px;font-weight:700;color:#BFE0D2;letter-spacing:.4px">GUARDADO / META</div>
-        <div style="font-size:24px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(guardadoAlvo)}</div>
-        <div style="font-size:11px;color:#BFE0D2;margin-top:4px">↑ ${rend.toFixed(0).replace(".",",")}% da renda</div>
+      <div class="card" style="background:var(--emerald);padding:16px 14px;border:none;color:#fff">
+        <div style="font-size:10.5px;font-weight:700;color:#7DE8D2;letter-spacing:.4px">GUARDADO / META</div>
+        <div style="font-size:23px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(guardadoAlvo)}</div>
+        <div style="font-size:11px;color:#7DE8D2;margin-top:4px">↑ ${rend.toFixed(0)}% da renda</div>
       </div>
     </div>
     <div class="card">
-      <div style="font-size:11px;font-weight:700;color:var(--graphite);letter-spacing:.3px">LIMITE DE GASTOS MENSAL</div>
-      <div style="font-size:22px;font-weight:800;color:var(--ink);margin-top:4px">${fmt(m.total)}</div>
-      <div class="barTrack" style="margin-top:8px">
-        <div style="position:absolute;left:${(m.ideal/Math.max(state.renda,1))*100}%;top:0;bottom:0;width:2px;background:#fff;opacity:.8;z-index:2"></div>
-        <div style="width:${pctGasto*100}%;height:100%;border-radius:8px;background:linear-gradient(90deg,var(--green),${barCor});transition:width .5s"></div>
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">LIMITE DE GASTOS MENSAL</div>
+      <div style="font-size:22px;font-weight:800;color:var(--navy);margin-top:4px">${fmt(m.total)}</div>
+      <div class="barTrack" style="margin-top:8px;background:#E8EEF1">
+        <div style="position:absolute;left:${(m.ideal/Math.max(state.renda,1))*100}%;top:0;bottom:0;width:2px;background:var(--navy);opacity:.3;z-index:2"></div>
+        <div class="limFill" style="width:${pctGasto*100}%;height:100%;border-radius:8px;background:linear-gradient(90deg,var(--ggreen),var(--emerald))"></div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:11.5px;color:var(--mute)">
         <span>${fmt(0)}</span><span>${fmt(state.renda)}</span>
       </div>
     </div>
     ${cardEscore(esc)}
-    ${cardGraficoHome(p,esc)}
     <div class="card">
-      <div style="font-size:12.5px;font-weight:700;color:var(--graphite);margin-bottom:8px">Composição deste mês</div>
-      ${miniRow("Ordinárias (fixas)",m.fixo,"var(--graphite)")}
-      ${miniRow("Estimadas (a confirmar)",m.estimado,"var(--mute)")}
-      ${miniRow("Eventuais",m.eventual,"var(--graphite)")}
-      ${miniRow("Parcelas do cartão",m.parcela,"var(--guava)")}
+      <div style="font-size:12.5px;font-weight:700;color:var(--navy);margin-bottom:8px">Composição deste mês</div>
+      ${miniRow("Ordinárias (fixas)",m.fixo,"var(--navy)")}
+      ${miniRow("Estimadas (a confirmar)",m.estimado,"var(--cyan)")}
+      ${miniRow("Eventuais",m.eventual,"var(--emerald)")}
+      ${miniRow("Parcelas do cartão",m.parcela,"var(--gpink)")}
     </div>
     <div class="grid2">
-      ${atalho("📊","Projeção",`${p.length} meses`,"proj","var(--blue)")}
-      ${atalho("📂","Despesas","incluir / editar","despesas","var(--graphite)")}
-      ${atalho("🎯","Metas",fechaMeta?"no alvo":"ajustar","metas","var(--green)")}
-      ${atalho("⚙️","Configurar",semBackend?"ativar IA + sync":"conta / IA","config","var(--mute)")}
+      ${atalho("📊","Projeção",`${p.length} meses`,"proj","var(--navy)")}
+      ${atalho("📂","Despesas","incluir / editar","despesas","var(--emerald)")}
+      ${atalho("🎯","Metas",fechaMeta?"no alvo":"ajustar","metas","var(--emerald)")}
+      ${atalho("⚙️","Configurar",semBackend?"ativar IA + sync":"conta / IA","config","var(--cyan)")}
     </div>
-    ${semBackend?`<div style="font-size:12px;color:var(--mute);text-align:center;padding:4px 10px 12px">💡 Texto e voz já funcionam. Para foto/PDF e sincronizar entre aparelhos, toque em ⚙️ Configurar.</div>`:""}
+    ${semBackend?`<div style="font-size:12px;color:var(--cyan);text-align:center;padding:4px 10px 12px">💡 Texto e voz já funcionam. Para foto/PDF e sincronizar, toque em ⚙️ Configurar.</div>`:""}
   </div>`;
 }
-const miniRow=(l,v,c)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:${c}"></span>${l}</span><span style="font-weight:600;color:${c}">${fmt(v)}</span></div>`;
+
+// Card "Visão de Futuro": gráfico de área em camadas + donut do escore sobreposto
+function cardVisaoFuturo(p, esc){
+  const W=320, H=170;
+  const serie=p.map(x=>x.total);
+  const maxV=Math.max(state.renda, ...serie)*1.1, minV=0;
+  const n=serie.length;
+  const px=i=>(i/(n-1))*W;
+  const py=v=>H-((v-minV)/(maxV-minV))*H;
+  // caminho suave (curva) para a linha de gasto
+  function pathDe(vals){
+    let d=`M0 ${py(vals[0])}`;
+    for(let i=1;i<vals.length;i++){
+      const x0=px(i-1),y0=py(vals[i-1]),x1=px(i),y1=py(vals[i]);
+      const xc=(x0+x1)/2;
+      d+=` C ${xc} ${y0}, ${xc} ${y1}, ${x1} ${y1}`;
+    }
+    return d;
+  }
+  const linha=pathDe(serie);
+  const area=linha+` L ${W} ${H} L 0 ${H} Z`;
+  // camadas decorativas de fundo (ondas) — estética orgânica do doc
+  const onda=(amp,off,op,cor)=>{
+    const vals=serie.map((v,i)=>v*0.55 + amp*Math.sin(i/1.6+off));
+    return `<path d="${pathDe(vals)} L ${W} ${H} L 0 ${H} Z" fill="${cor}" opacity="${op}"/>`;
+  };
+  const rendaY=py(state.renda);
+  const pontos=serie.map((v,i)=>`<circle cx="${px(i)}" cy="${py(v)}" r="3.5" fill="#fff" opacity="${i===0?1:.7}"/>`).join("");
+  // marca o pico (último) com bolinha rosa, como na imagem
+  const ult=n-1;
+  const picoRosa=`<circle cx="${px(ult)}" cy="${py(serie[ult])}" r="6" fill="var(--gpink)"/><circle cx="${px(ult)}" cy="${py(serie[ult])}" r="11" fill="var(--gpink)" opacity="0.25"/>`;
+  const ang=esc.score*3.6;
+  const meses=p.map(x=>x.mes);
+  const lblMeses=meses.map((mes,i)=> (i%Math.ceil(n/7)===0)?`<span style="flex:1;text-align:center">${mes}</span>`:`<span style="flex:1"></span>`).join("");
+  return `<div class="card" style="background:var(--grad-dash);border:none;color:#fff;padding:16px 14px 12px;position:relative;overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+      <span style="font-size:16px;font-weight:800;color:#fff">Visão de Futuro <span style="color:var(--cyan);font-weight:600">(${state.horizonte} meses)</span></span>
+    </div>
+    <div style="position:relative">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block;overflow:visible">
+        <defs>
+          <linearGradient id="gArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#00C49F" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#00C49F" stop-opacity="0.05"/>
+          </linearGradient>
+        </defs>
+        ${onda(8,0,0.18,"#0E6E66")}
+        ${onda(6,2,0.22,"#0B4F6C")}
+        <path d="${area}" fill="url(#gArea)"/>
+        <path d="${linha}" fill="none" stroke="#7DE8D2" stroke-width="2.5"/>
+        <line x1="0" y1="${rendaY}" x2="${W}" y2="${rendaY}" stroke="#fff" stroke-dasharray="4 4" opacity="0.35"/>
+        ${pontos}${picoRosa}
+      </svg>
+      <!-- balão renda no topo -->
+      <div style="position:absolute;top:-2px;right:0;background:rgba(255,255,255,.16);backdrop-filter:blur(6px);border-radius:12px;padding:4px 10px;font-size:12px;font-weight:800">${fmt(state.renda)}</div>
+      <!-- donut do escore sobreposto ao centro -->
+      <div style="position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);text-align:center">
+        <div style="font-size:10px;font-weight:700;color:var(--cyan);margin-bottom:4px;text-shadow:0 1px 3px rgba(0,0,0,.4)">Comportamento</div>
+        <div style="width:96px;height:96px;border-radius:50%;background:conic-gradient(var(--ggreen) ${ang}deg, rgba(255,255,255,.18) ${ang}deg);display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.3)">
+          <div style="width:78px;height:78px;border-radius:50%;background:#0A2540;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <span style="font-size:26px;font-weight:800;color:#fff;line-height:1">${esc.score}<span style="font-size:11px;color:var(--cyan)">/100</span></span>
+            <span style="font-size:9px;font-weight:700;color:var(--ggreen);letter-spacing:.5px">${esc.faixa.nome.toUpperCase()}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;margin-top:6px;font-size:9px;color:var(--cyan)">${lblMeses}</div>
+  </div>`;
+}
+const miniRow=(l,v,c)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:3px;background:${c}"></span>${l}</span><span style="font-weight:700;color:${c}">${fmt(v)}</span></div>`;
 const atalho=(ic,l,s,t,c)=>`<button class="card" onclick="_g.setTab('${t}')" style="padding:16px 14px;text-align:left;display:block;width:100%"><div style="font-size:22px">${ic}</div><div style="font-size:14.5px;font-weight:700;color:${c};margin-top:6px">${l}</div><div style="font-size:11px;color:var(--mute)">${s}</div></button>`;
 
 // ---------- Projeção ----------
