@@ -119,7 +119,7 @@ const FUNCAO_URL_PADRAO = "";
 let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],historico:[],pagosMes:{},mesRef:""};
 let cfg={firebase:null,funcaoUrl:""};
 let tab="inicio", modoAdd="texto", filtroDesp="todos";
-let ouvindo=false, rec=null, resultadoTmp=null;
+let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null;
 let fb={app:null,db:null,auth:null,uid:null,ref:null,unsub:null};
 
 const seed=[
@@ -466,13 +466,13 @@ G.setFiltro=g=>{ filtroDesp=g; render(); };
 G.setModo=k=>{ modoAdd=k; ouvindo=false; render(); };
 
 function render(){
-  document.getElementById("rendaVal").textContent=fmt(state.renda)+" ✏️";
+  document.getElementById("rendaVal").innerHTML=fmt(state.renda)+' <span style="color:var(--gpink)">✏️</span>';
   const sync=fb.ref?" · sincronizado":"";
   document.getElementById("hsub").textContent=`gestão familiar · ${state.horizonte} meses${sync}`;
   renderNav();
   if(tab==="inicio") app.innerHTML=viewInicio();
   else if(tab==="proj") app.innerHTML=viewProj();
-  else if(tab==="despesas") app.innerHTML=viewDespesas();
+  else if(tab==="despesas"){ app.innerHTML=viewDespesas(); if(editandoId){ const b=document.getElementById("ed-"+editandoId); if(b){ b.classList.remove("hidden"); renderEdicao(editandoId); } } }
   else if(tab==="metas") app.innerHTML=viewMetas();
   else if(tab==="add"){ app.innerHTML=viewAdd(); ligarAdd(); }
   else if(tab==="config"){ app.innerHTML=viewConfig(); ligarConfig(); }
@@ -725,18 +725,43 @@ function itemCard(it){
   </div>`;
 }
 G.editar=id=>{
-  const it=state.itens.find(x=>x.id===id), box=document.getElementById("ed-"+id);
+  const box=document.getElementById("ed-"+id);
   if(!box) return;
-  if(!box.classList.contains("hidden")){ box.classList.add("hidden"); return; }
+  if(!box.classList.contains("hidden")){ box.classList.add("hidden"); editandoId=null; return; }
+  editandoId=id;
   box.classList.remove("hidden");
+  renderEdicao(id);
+};
+function renderEdicao(id){
+  const it=state.itens.find(x=>x.id===id), box=document.getElementById("ed-"+id);
+  if(!it||!box) return;
   const campo=(lb,key,val,type="text")=>`<label class="fld">${lb}<input class="inp" type="${type}" ${type==='number'?'inputmode="numeric"':''} value="${escapeAttr(val)}" oninput="_g.campo('${id}','${key}',this.value,${type==='number'})"></label>`;
-  let html=campo("Nome","nome",it.nome);
+  // seletor de natureza (reclassificação)
+  const natBtn=nat=>`<button onclick="_g.setNatItem('${id}','${nat}')" style="flex:1;padding:8px 0;border-radius:9px;border:1.5px solid ${it.natureza===nat?NAT_COR[nat]:'var(--line)'};background:${it.natureza===nat?NAT_COR[nat]:'#fff'};color:${it.natureza===nat?'#fff':'var(--mute)'};font-size:11px;font-weight:700">${NAT_LABEL[nat].split(" ")[0]}</button>`;
+  let html=`<label class="fld" style="margin-bottom:2px">Tipo de despesa</label>
+    <div style="display:flex;gap:5px;margin-bottom:10px">${["ordinaria","estimada","eventual","parcela"].map(natBtn).join("")}</div>`;
+  html+=campo("Nome","nome",it.nome);
   if(it.natureza==="estimada") html+=`<div style="display:flex;gap:8px">${campo("Mínimo (R$)","min",it.min,"number")}${campo("Máximo (R$)","max",it.max,"number")}</div>`;
-  else html+=campo(it.natureza==="parcela"?"Valor da parcela (R$)":"Valor (R$)","valor",it.valor,"number");
+  else html+=campo(it.natureza==="parcela"?"Valor da parcela (R$)":(it.natureza==="ordinaria"?"Valor mensal (R$)":"Valor (R$)"),"valor",it.valor,"number");
   if(it.natureza==="parcela") html+=campo("Parcelas restantes","restam",it.restam,"number");
   if(it.natureza==="eventual") html+=campo("Daqui a quantos meses (0=este)","mesIdx",it.mesIdx||0,"number");
   html+=`<label class="fld">Categoria<select class="inp" onchange="_g.campo('${id}','cat',this.value,false)">${CATEGORIAS.map(c=>`<option ${c===it.cat?'selected':''}>${c}</option>`).join("")}</select></label>`;
   box.innerHTML=`<div>${html}</div><button class="btnG" style="margin-top:12px;width:100%" onclick="_g.editar('${id}')">fechar edição</button>`;
+}
+// reclassifica a natureza de um item já existente, preenchendo defaults
+G.setNatItem=(id,nat)=>{
+  const it=state.itens.find(x=>x.id===id); if(!it||it.natureza===nat) return;
+  const base=+it.valor || (it.min!=null?Math.round((+it.min+ +it.max)/2):0);
+  const patch={natureza:nat};
+  if(nat==="estimada"){ patch.min=it.min!=null?it.min:(base?Math.round(base*0.8):0); patch.max=it.max!=null?it.max:(base?Math.round(base*1.2):0); patch.valor=undefined; patch.restam=undefined; patch.total=undefined; patch.mesIdx=undefined; }
+  else if(nat==="parcela"){ patch.valor=base||0; patch.restam=it.restam!=null?it.restam:2; patch.total=(base||0)*(it.restam!=null?it.restam:2); patch.min=undefined; patch.max=undefined; patch.mesIdx=undefined; }
+  else if(nat==="eventual"){ patch.valor=base||0; patch.mesIdx=it.mesIdx!=null?it.mesIdx:0; patch.min=undefined; patch.max=undefined; patch.restam=undefined; patch.total=undefined; }
+  else { patch.valor=base||0; patch.min=undefined; patch.max=undefined; patch.restam=undefined; patch.total=undefined; patch.mesIdx=undefined; }
+  // aplica removendo chaves indefinidas
+  state.itens=state.itens.map(x=>{ if(x.id!==id) return x; const novo={...x,...patch}; Object.keys(novo).forEach(k=>novo[k]===undefined&&delete novo[k]); return novo; });
+  salvar();
+  editandoId=id;
+  render(); // re-renderiza a lista (atualiza valor/subtítulo do card) e reabre a edição
 };
 G.campo=(id,key,val,num)=>{
   const patch={[key]:num?(val===""?0:Number(val)):val};
