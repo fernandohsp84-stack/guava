@@ -69,8 +69,17 @@
 <body>
 <div id="saveTag" class="saveTag">salvo ✓</div>
 
-<header>
-  <div class="hgrid" style="position:relative">
+<header style="position:relative;overflow:hidden">
+  <svg viewBox="0 0 400 90" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;opacity:.5;pointer-events:none" aria-hidden="true">
+    <defs><linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0E6E66" stop-opacity="0"/><stop offset="100%" stop-color="#3FD9BC" stop-opacity=".9"/></linearGradient></defs>
+    <path d="M0 78 C 70 72, 120 64, 170 50 S 280 26, 360 14" fill="none" stroke="url(#trail)" stroke-width="2.5"/>
+    <path d="M345 8 L362 12 L352 24 Z" fill="#3FD9BC"/>
+    <circle cx="170" cy="50" r="4" fill="#FF6584"/>
+    <circle cx="170" cy="50" r="8" fill="#FF6584" opacity=".25"/>
+    <path d="M0 60 C 90 56, 160 48, 230 38 S 330 20, 400 10" fill="none" stroke="#3FD9BC" stroke-width="1" opacity=".25"/>
+  </svg>
+  <div class="hgrid" style="position:relative;align-items:flex-end">
     <div style="display:flex;align-items:center;gap:9px">
       <svg width="30" height="32" viewBox="0 0 30 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Guava">
         <path d="M16.4 5.2c1.6-2.1 4.1-3 6.2-2.7-.2 2.1-1.5 4.2-3.6 5.1-1 .4-2 .5-2.9.3" fill="#00C49F"/>
@@ -79,12 +88,12 @@
       </svg>
       <span style="font-size:25px;font-weight:800;letter-spacing:-.6px;color:#fff">Guava</span>
     </div>
-    <button id="rendaBtn" style="text-align:right;background:none;border:none">
+    <button id="rendaBtn" style="text-align:right;background:none;border:none;align-self:flex-end;margin-top:22px">
       <div style="font-size:9.5px;color:var(--cyan)">renda mensal</div>
       <div id="rendaVal" style="font-size:16px;font-weight:800;color:#fff">R$ 0 <span style="color:var(--gpink)">✏️</span></div>
     </button>
   </div>
-  <div id="hsub" style="font-size:11px;color:var(--cyan);margin-top:3px">gestão familiar</div>
+  <div id="hsub" style="font-size:11px;color:var(--cyan);margin-top:3px;position:relative"></div>
 </header>
 
 <main id="app"></main>
@@ -118,7 +127,7 @@ const FUNCAO_URL_PADRAO = "";
 // ====================================================================
 
 // ---------- estado ----------
-let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],historico:[],pagosMes:{},mesRef:"",incentivos:[]};
+let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[]};
 let cfg={firebase:null,funcaoUrl:""};
 let tab="inicio", modoAdd="texto", filtroDesp="todos";
 let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null, mesDetalhe=null, incEdit=null;
@@ -192,6 +201,42 @@ function salvar(){
 function flashSave(){
   const t=document.getElementById("saveTag");
   t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),1100);
+}
+
+// ---------- Retenção de histórico para recalibragem do modelo ----------
+// Registra um snapshot por dia dos indicadores-chave, formando série temporal.
+function registrarSnapshot(){
+  const hoje=new Date().toISOString().slice(0,10);
+  state.serieHistorica=state.serieHistorica||[];
+  // no máximo um snapshot por dia (atualiza o do dia se já existir)
+  const p=projecao(), m=p[0];
+  const esc=calcularEscore(p,state.renda,state.metaPct);
+  const pred=calcularEscorePreditivo(state.renda,state.metaPct);
+  const snap={
+    data:hoje, ts:Date.now(),
+    renda:state.renda, metaPct:state.metaPct, horizonte:state.horizonte,
+    gastoMes:Math.round(m.total),
+    composicao:{fixo:Math.round(m.fixo),estimado:Math.round(m.estimado),eventual:Math.round(m.eventual),parcela:Math.round(m.parcela)},
+    escoreAtual:esc.score, escorePreditivo:pred.indisponivel?null:pred.score,
+    gapMeses:esc.gapMeses, qtdItens:state.itens.length,
+    qtdParcelas:state.itens.filter(i=>i.natureza==="parcela").length,
+    saldoParcelas:Math.round(state.itens.filter(i=>i.natureza==="parcela").reduce((s,i)=>s+(+i.valor||0)*(+i.restam||0),0)),
+    receitasExtras:Math.round((state.receitas||[]).reduce((s,r)=>s+(+r.valor||0),0)),
+    qtdReceitas:(state.receitas||[]).length,
+  };
+  const idx=state.serieHistorica.findIndex(s=>s.data===hoje);
+  if(idx>=0) state.serieHistorica[idx]=snap; else state.serieHistorica.push(snap);
+  // mantém no máximo ~400 snapshots (mais de um ano) para não inflar storage
+  if(state.serieHistorica.length>400) state.serieHistorica=state.serieHistorica.slice(-400);
+  salvarLocal();
+}
+// exporta a série como CSV (para análise externa / recalibragem do modelo)
+function exportarSerieCSV(){
+  const s=state.serieHistorica||[];
+  if(!s.length) return null;
+  const cab="data,renda,metaPct,horizonte,gastoMes,fixo,estimado,eventual,parcela,escoreAtual,escorePreditivo,gapMeses,qtdItens,qtdParcelas,saldoParcelas,receitasExtras,qtdReceitas";
+  const linhas=s.map(x=>[x.data,x.renda,x.metaPct,x.horizonte,x.gastoMes,x.composicao.fixo,x.composicao.estimado,x.composicao.eventual,x.composicao.parcela,x.escoreAtual,x.escorePreditivo??"",x.gapMeses,x.qtdItens,x.qtdParcelas,x.saldoParcelas,x.receitasExtras??0,x.qtdReceitas??0].join(","));
+  return cab+"\n"+linhas.join("\n");
 }
 
 // ---------- Firebase (carregado só se configurado) ----------
@@ -301,12 +346,18 @@ const Analise={
     };
   }
 };
+// receita extra (não recorrente) de um mês i
+function receitaExtraMes(i){
+  return (state.receitas||[]).reduce((s,r)=>s+((+r.mesIdx||0)===i?(+r.valor||0):0),0);
+}
 function projecao(){
   const now=new Date(),out=[];
   for(let i=0;i<state.horizonte;i++){
     const g=gastoDoMes(i), ideal=state.renda*(1-state.metaPct);
+    const extra=receitaExtraMes(i);
+    const rendaMes=state.renda+extra;
     const mIdx=(now.getMonth()+i)%12, ano=now.getFullYear()+Math.floor((now.getMonth()+i)/12);
-    out.push({...g,idx:i,mes:MESES[mIdx],ano,ideal,sobra:state.renda-g.total});
+    out.push({...g,idx:i,mes:MESES[mIdx],ano,ideal,extra,rendaMes,sobra:rendaMes-g.total});
   }
   return out;
 }
@@ -337,14 +388,12 @@ function gastoMesAnterior(){
   return {fixo,estimado,eventual:0,parcela,total:fixo+estimado+parcela};
 }
 
-// ---- Escore de comportamento financeiro (GAP como target) + retrospectivo ----
-function calcularEscore(p, renda, metaPct){
+// ---- Núcleo prospectivo: os 4 fatores sobre uma janela de projeção ----
+function escoreProspectivo(p, renda, metaPct){
   const n=p.length||1, guardarAlvo=renda*metaPct;
   const gapMeses=p.filter(x=>x.sobra<0).length;
   const gapTotal=p.reduce((s,x)=>s+(x.sobra<0?-x.sobra:0),0);
-  // "quase-GAP": meses sem déficit mas com sobra abaixo da meta (alerta antecipado)
   const quaseGap=p.filter(x=>x.sobra>=0 && x.sobra<guardarAlvo).length;
-  // saúde do GAP: déficit conta inteiro, quase-GAP conta meio. Penalidade não-linear.
   const pesoRisco=(gapMeses + 0.5*quaseGap)/n;
   const fracSemGap=Math.pow(Math.max(0,1-pesoRisco), 1.3);
   const folgaMedia=p.reduce((s,x)=>s+x.sobra,0)/n;
@@ -355,6 +404,40 @@ function calcularEscore(p, renda, metaPct){
   const cumpreMeta=p.filter(x=>x.sobra>=guardarAlvo).length/n;
   const W={gap:0.50,folga:0.18,parcela:0.18,meta:0.14};
   const scoreFuturo=100*(W.gap*fracSemGap+W.folga*fracFolga+W.parcela*fracParcela+W.meta*cumpreMeta);
+  const fatores=[
+    {nome:"Sem déficit (GAP)",frac:fracSemGap,peso:W.gap},
+    {nome:"Folga de caixa",frac:fracFolga,peso:W.folga},
+    {nome:"Parcelas sob controle",frac:fracParcela,peso:W.parcela},
+    {nome:"Meta de poupança",frac:cumpreMeta,peso:W.meta},
+  ];
+  return {scoreFuturo,gapMeses,gapTotal,quaseGap,fatores};
+}
+function faixaDe(score){
+  if(score>=85) return {nome:"Excelente",cor:"#065F46"};
+  if(score>=65) return {nome:"Saudável",cor:"#3E8E5A"};
+  if(score>=40) return {nome:"Atenção",cor:"#E0922F"};
+  return {nome:"Crítico",cor:"#FA8072"};
+}
+
+// ---- Escore PREDITIVO de 6 meses: posiciona-se no mês 6 e projeta até o fim do horizonte ----
+function calcularEscorePreditivo(renda, metaPct){
+  const inicio=6;
+  const p=projecao(); // já respeita state.horizonte (12 ou 18)
+  const janela=p.slice(inicio); // do mês 6 até o fim (12→6 meses; 18→12 meses)
+  if(!janela.length){
+    return {score:null, indisponivel:true, faixa:faixaDe(0), janelaMeses:0};
+  }
+  const pros=escoreProspectivo(janela, renda, metaPct);
+  const score=Math.round(pros.scoreFuturo);
+  const mesAlvo=p[inicio]?`${p[inicio].mes}/${p[inicio].ano}`:"";
+  return {score, faixa:faixaDe(score), gapMeses:pros.gapMeses, gapTotal:pros.gapTotal,
+    quaseGap:pros.quaseGap, fatores:pros.fatores, janelaMeses:janela.length, mesAlvo, indisponivel:false};
+}
+
+// ---- Escore de comportamento financeiro (GAP como target) + retrospectivo ----
+function calcularEscore(p, renda, metaPct){
+  const pros=escoreProspectivo(p, renda, metaPct);
+  const {scoreFuturo,gapMeses,gapTotal,quaseGap,fatores}=pros;
 
   // ---- componente RETROSPECTIVO: disciplina real dos meses fechados ----
   const fechados=(state.historico||[]).filter(h=>h.fechado);
@@ -379,21 +462,12 @@ function calcularEscore(p, renda, metaPct){
     score=Math.round(scoreFuturo);
   }
 
-  let faixa;
-  if(score>=85) faixa={nome:"Excelente",cor:"#065F46"};
-  else if(score>=65) faixa={nome:"Saudável",cor:"#3E8E5A"};
-  else if(score>=40) faixa={nome:"Atenção",cor:"#E0922F"};
-  else faixa={nome:"Crítico",cor:"#FA8072"};
+  const faixa=faixaDe(score);
   return {score,faixa,gapMeses,gapTotal,quaseGap,
     scoreFuturo:Math.round(scoreFuturo),
     scoreRetro:scoreRetro!=null?Math.round(scoreRetro):null,
     pesoRetro, mesesFechados:fechados.length,
-    fatores:[
-      {nome:"Sem déficit (GAP)",frac:fracSemGap,peso:W.gap},
-      {nome:"Folga de caixa",frac:fracFolga,peso:W.folga},
-      {nome:"Parcelas sob controle",frac:fracParcela,peso:W.parcela},
-      {nome:"Meta de poupança",frac:cumpreMeta,peso:W.meta},
-    ]};
+    fatores};
 }
 
 // cartão do escore na home
@@ -426,6 +500,50 @@ function cardEscore(esc){
       <span style="color:var(--mute)">📅 histórico real <b style="color:var(--navy)">${esc.scoreRetro}</b> · ${esc.mesesFechados} ${esc.mesesFechados===1?'mês':'meses'}</span>
     </div>`:""}
     <div style="font-size:10.5px;color:var(--mute);margin-top:10px;line-height:1.4">O alvo do escore é zerar o GAP — meses em que as despesas projetadas superam a receita.${esc.scoreRetro!=null?` Agora ele também pesa seu histórico real (${Math.round(esc.pesoRetro*100)}%).`:""}</div>
+  </div>`;
+}
+
+// cartão do escore PREDITIVO de 6 meses
+function cardEscorePreditivo(){
+  const pr=calcularEscorePreditivo(state.renda, state.metaPct);
+  const escAtual=calcularEscore(projecao(), state.renda, state.metaPct);
+  if(pr.indisponivel){
+    return `<div class="card" style="background:var(--grad-dash);border:none;color:#fff">
+      <div style="font-size:13px;font-weight:700">🔮 Escore preditivo (6 meses)</div>
+      <div style="font-size:12px;color:var(--cyan);margin-top:6px">Aumente o horizonte para 18 meses para projetar além do 6º mês.</div></div>`;
+  }
+  const delta=pr.score-escAtual.score;
+  const setaCor=delta>0?"var(--ggreen)":delta<0?"var(--gpink)":"var(--cyan)";
+  const setaTxt=delta>0?`▲ +${delta}`:delta<0?`▼ ${delta}`:"=";
+  const ang=pr.score*3.6;
+  const gapTxt=pr.gapMeses>0
+    ? `<span style="color:var(--gpink);font-weight:700">${pr.gapMeses} ${pr.gapMeses===1?'mês':'meses'}</span> com déficit na janela`
+    : pr.quaseGap>0
+      ? `<span style="color:#FFD27D;font-weight:700">${pr.quaseGap} ${pr.quaseGap===1?'mês':'meses'}</span> com folga abaixo da meta`
+      : `<span style="color:var(--ggreen);font-weight:700">nenhum mês</span> com déficit na janela`;
+  return `<div class="card" style="background:var(--grad-dash);border:none;color:#fff">
+    <div style="display:flex;align-items:center;gap:14px">
+      <div style="width:78px;height:78px;border-radius:50%;background:conic-gradient(var(--ggreen) ${ang}deg, rgba(255,255,255,.16) ${ang}deg);display:flex;align-items:center;justify-content:center;flex:none">
+        <div style="width:60px;height:60px;border-radius:50%;background:#0A2540;display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <span style="font-size:21px;font-weight:800;color:#fff;line-height:1">${pr.score}</span>
+          <span style="font-size:8px;color:var(--cyan)">de 100</span>
+        </div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:.3px">🔮 ESCORE PREDITIVO · 6 MESES</div>
+        <div style="font-size:16px;font-weight:800;color:#fff;margin:2px 0">${pr.faixa.nome} <span style="font-size:12px;color:${setaCor};font-weight:700">${setaTxt}</span></div>
+        <div style="font-size:11.5px;color:var(--cyan)">se posiciona em <b style="color:#fff">${pr.mesAlvo}</b> e projeta ${pr.janelaMeses} ${pr.janelaMeses===1?'mês':'meses'} à frente</div>
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:#C8D6E5;margin-top:10px;line-height:1.4">${gapTxt}.</div>
+    <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+      ${pr.fatores.map(f=>{const c=f.frac>=0.85?"var(--ggreen)":f.frac>=0.5?"var(--cyan)":"var(--gpink)";return `<div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:10.5px;color:var(--cyan);width:118px;flex:none">${f.nome}</span>
+        <div style="flex:1;height:6px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden"><div style="width:${Math.round(f.frac*100)}%;height:100%;background:${c}"></div></div>
+        <span style="font-size:10px;color:var(--cyan);width:28px;text-align:right">${Math.round(f.frac*100)}%</span>
+      </div>`;}).join("")}
+    </div>
+    <div style="font-size:10px;color:var(--cyan);margin-top:10px;line-height:1.4">Mesma metodologia do escore atual, mas a janela começa daqui a 6 meses — mostra como sua saúde financeira tende a evoluir conforme parcelas terminam.</div>
   </div>`;
 }
 
@@ -525,14 +643,14 @@ const G={};
 window._g=G;
 G.setTab=t=>{ tab=t; modoAdd="texto"; render(); window.scrollTo(0,0); };
 G.setHor=h=>{ state.horizonte=h; salvar(); render(); window.scrollTo(0,0); };
-G.setMeta=x=>{ state.metaPct=x; salvar(); };
+G.setMeta=x=>{ state.metaPct=x; salvar(); render(); };
 G.setFiltro=g=>{ filtroDesp=g; render(); };
 G.setModo=k=>{ modoAdd=k; ouvindo=false; render(); };
 
 function render(){
   document.getElementById("rendaVal").innerHTML=fmt(state.renda)+' <span style="color:var(--gpink)">✏️</span>';
   const sync=fb.ref?" · sincronizado":"";
-  document.getElementById("hsub").textContent=`gestão familiar · ${state.horizonte} meses${sync}`;
+  document.getElementById("hsub").textContent=`${state.horizonte} meses${sync}`;
   renderNav();
   app.classList.remove("swap"); void app.offsetWidth; app.classList.add("swap");
   if(tab==="inicio") app.innerHTML=viewInicio();
@@ -573,16 +691,24 @@ function viewInicio(){
       <span style="font-size:11.5px;font-weight:700;color:${state.horizonte===18?'#fff':'var(--cyan)'}">18 meses</span>
     </div>
     ${cardVisaoFuturo(p,esc)}
+    ${cardEscoresGrafico()}
     <div class="grid2">
-      <div class="card" style="background:var(--navy);padding:16px 14px;border:none;color:#fff">
-        <div style="font-size:10.5px;font-weight:700;color:var(--cyan);letter-spacing:.4px">DISPONÍVEL P/ GASTAR</div>
-        <div style="font-size:23px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(disponivel)}</div>
-        <div style="font-size:11px;color:var(--cyan);margin-top:4px;opacity:.85">de ${fmt(state.renda)} de renda</div>
+      <div class="card" style="background:linear-gradient(155deg,#15406B,#0A2540);padding:15px 14px;border:none;color:#fff;position:relative;overflow:hidden">
+        <div style="font-size:11px;font-weight:600;color:#C8D6E5">Disponível p/ gastar</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px">
+          ${svgCarteira()}
+          ${svgGauge(Math.max(0,Math.min(disponivel/Math.max(state.renda,1),1)))}
+        </div>
+        <div style="font-size:24px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(disponivel)}</div>
+        <div style="font-size:10.5px;color:#9DB4CC;margin-top:2px">de ${fmt(state.renda)} de renda</div>
       </div>
-      <div class="card" style="background:var(--emerald);padding:16px 14px;border:none;color:#fff">
-        <div style="font-size:10.5px;font-weight:700;color:#7DE8D2;letter-spacing:.4px">GUARDADO / META</div>
-        <div style="font-size:23px;font-weight:800;color:#fff;margin-top:8px;letter-spacing:-.5px">${fmt(guardadoAlvo)}</div>
-        <div style="font-size:11px;color:#7DE8D2;margin-top:4px">↑ ${rend.toFixed(0)}% da renda</div>
+      <div class="card" style="background:linear-gradient(155deg,#1E3A5F,#16304F);padding:15px 14px;border:none;color:#fff;position:relative;overflow:hidden">
+        <div style="font-size:11px;font-weight:600;color:#C8D6E5">Metas de Poupança</div>
+        <div style="display:flex;justify-content:flex-end;margin-top:2px">${svgNotebook()}</div>
+        <div class="barTrack" style="height:8px;background:rgba(255,255,255,.18);margin-top:6px">
+          <div style="width:${Math.min(guardadoAlvo/Math.max(state.renda*0.3,1)*100,100)}%;height:100%;border-radius:8px;background:linear-gradient(90deg,#7DE8D2,#00C49F)"></div>
+        </div>
+        <div style="margin-top:8px"><span style="font-size:22px;font-weight:800;color:#fff;letter-spacing:-.5px">${fmt(guardadoAlvo)}</span> <span style="font-size:11px;color:#9DB4CC">(${rend.toFixed(0)}% da Renda)</span></div>
       </div>
     </div>
     <div class="card">
@@ -597,6 +723,7 @@ function viewInicio(){
       </div>
     </div>
     ${cardEscore(esc)}
+    ${cardEscorePreditivo()}
     <div class="card">
       <div style="font-size:12.5px;font-weight:700;color:var(--navy);margin-bottom:8px">Composição deste mês</div>
       ${miniRow("Ordinárias (fixas)",m.fixo,"var(--navy)")}
@@ -684,6 +811,88 @@ function cardVisaoFuturo(p, esc){
     <div style="display:flex;margin-top:6px;font-size:9px;color:var(--cyan)">${lblMeses}</div>
   </div>`;
 }
+
+// ===== Quadro dedicado: comparação de escores (hoje vs 6º mês) =====
+function cardEscoresGrafico(){
+  const esc=calcularEscore(projecao(), state.renda, state.metaPct);
+  const pred=calcularEscorePreditivo(state.renda, state.metaPct);
+  const escHoje=esc.score;
+  const escPred=pred.indisponivel?null:pred.score;
+  const delta=escPred!=null?escPred-escHoje:0;
+  const W=320,H=160;
+  // escala com zoom na faixa 40-100
+  const lo=40,hi=100;
+  const y=s=>{ const f=Math.max(0,Math.min((s-lo)/(hi-lo),1)); return H-14 - f*(H-30); };
+  const yH=y(escHoje), yP=escPred!=null?y(escPred):null;
+  const faixaCor=s=>s>=85?"#00C49F":s>=65?"#3FD9BC":s>=40?"#E0922F":"#FF6584";
+  // ondas decorativas de fundo (estética orgânica do gráfico principal), em azul e verde
+  const onda=(base,amp,off,op,cor)=>{
+    let d=`M0 ${base}`;
+    for(let i=1;i<=8;i++){ const x=(i/8)*W; const yy=base+amp*Math.sin(i/1.5+off); const xc=x-(W/8)/2; d+=` Q ${xc} ${base+amp*Math.sin((i-0.5)/1.5+off)}, ${x} ${yy}`; }
+    return `<path d="${d} L ${W} ${H} L 0 ${H} Z" fill="${cor}" opacity="${op}"/>`;
+  };
+  // linha curva suave de um escore + área sob ela
+  const curva=(yv)=>{
+    const wobble=2.2;
+    let d=`M0 ${yv}`;
+    for(let i=1;i<=6;i++){ const x=(i/6)*W; const yy=yv+wobble*Math.sin(i*1.3); const xc=x-(W/6)/2; d+=` Q ${xc} ${yv+wobble*Math.sin((i-0.5)*1.3)}, ${x} ${yy}`; }
+    return d;
+  };
+  const cHoje=curva(yH);
+  const areaHoje=`<path d="${cHoje} L ${W} ${H} L 0 ${H} Z" fill="url(#gEscHoje)"/><path d="${cHoje}" stroke="#00E0C0" stroke-width="2.5" fill="none" filter="url(#glowG)"/>`;
+  const cPred=escPred!=null?curva(yP):null;
+  const areaPred=escPred!=null?`<path d="${cPred} L ${W} ${H} L 0 ${H} Z" fill="url(#gEscPred)"/><path d="${cPred}" stroke="#3FA9FF" stroke-width="2.5" fill="none" filter="url(#glowB)"/>`:"";
+  const camadas = (escPred!=null && escPred>=escHoje) ? areaHoje+areaPred : areaPred+areaHoje;
+  // pontos brilhantes nas pontas
+  const ptHoje=`<circle cx="${W-7}" cy="${yH.toFixed(1)}" r="5" fill="#00E0C0" filter="url(#glowG)"/><circle cx="${W-7}" cy="${yH.toFixed(1)}" r="2.4" fill="#fff"/>`;
+  const ptPred=escPred!=null?`<circle cx="${W-7}" cy="${yP.toFixed(1)}" r="5" fill="#3FA9FF" filter="url(#glowB)"/><circle cx="${W-7}" cy="${yP.toFixed(1)}" r="2.4" fill="#fff"/>`:"";
+  return `<div class="card" style="background:linear-gradient(165deg,#0E3D52 0%,#0A2540 60%,#06203A 100%);border:none;color:#fff;padding:16px 14px 14px;position:relative;overflow:hidden">
+    <div style="font-size:15px;font-weight:800;margin-bottom:2px">Comparativo de escore</div>
+    <div style="font-size:11px;color:var(--cyan);margin-bottom:12px">hoje vs. como estará daqui a 6 meses</div>
+    <div style="position:relative">
+      <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block;overflow:visible">
+        <defs>
+          <linearGradient id="gEscHoje" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#00E0C0" stop-opacity="0.5"/>
+            <stop offset="100%" stop-color="#00C49F" stop-opacity="0.04"/>
+          </linearGradient>
+          <linearGradient id="gEscPred" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3FA9FF" stop-opacity="0.5"/>
+            <stop offset="100%" stop-color="#1E5FA8" stop-opacity="0.04"/>
+          </linearGradient>
+          <filter id="glowG" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <filter id="glowB" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        ${onda(H*0.62,7,0,0.20,"#0E6E66")}
+        ${onda(H*0.70,6,2,0.22,"#0B4F6C")}
+        ${onda(H*0.80,5,4,0.18,"#103A6B")}
+        ${[50,60,70,80,90,100].map(v=>`<line x1="0" y1="${y(v).toFixed(1)}" x2="${W}" y2="${y(v).toFixed(1)}" stroke="rgba(255,255,255,.07)" stroke-width="1"/><text x="2" y="${(y(v)-2).toFixed(1)}" fill="rgba(255,255,255,.3)" font-size="8">${v}</text>`).join("")}
+        ${camadas}
+        ${ptHoje}${ptPred}
+      </svg>
+    </div>
+    <div style="display:flex;justify-content:center;gap:16px;margin-top:8px;font-size:10.5px">
+      <span style="display:flex;align-items:center;gap:5px;color:#00E0C0"><span style="width:12px;height:8px;border-radius:2px;background:linear-gradient(#00E0C0,rgba(0,224,192,.1))"></span>hoje</span>
+      ${escPred!=null?`<span style="display:flex;align-items:center;gap:5px;color:#3FA9FF"><span style="width:12px;height:8px;border-radius:2px;background:linear-gradient(#3FA9FF,rgba(63,169,255,.1))"></span>6º mês</span>`:""}
+    </div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <div style="flex:1;background:rgba(0,224,192,.1);border:1px solid rgba(0,224,192,.3);border-radius:12px;padding:10px 12px">
+        <div style="font-size:10px;color:#00E0C0;font-weight:700">ESCORE HOJE</div>
+        <div style="font-size:26px;font-weight:800;color:#fff;line-height:1.1">${escHoje}<span style="font-size:11px;color:var(--cyan)">/100</span></div>
+        <div style="font-size:10px;font-weight:700;color:${faixaCor(escHoje)}">${esc.faixa.nome}</div>
+      </div>
+      <div style="flex:1;background:rgba(63,169,255,.1);border:1px solid rgba(63,169,255,.35);border-radius:12px;padding:10px 12px">
+        <div style="font-size:10px;color:#3FA9FF;font-weight:700">EM 6 MESES</div>
+        <div style="font-size:26px;font-weight:800;color:#fff;line-height:1.1">${escPred??"—"}${escPred!=null?`<span style="font-size:11px;color:var(--cyan)">/100</span>`:""}</div>
+        <div style="font-size:10px;font-weight:700;color:${escPred!=null?faixaCor(escPred):"var(--cyan)"}">${escPred!=null?pred.faixa.nome:"aumente p/ 18m"}</div>
+      </div>
+    </div>
+    ${escPred!=null?`<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;font-size:12px">
+      ${delta>0?`<span style="color:var(--ggreen);font-weight:800">▲ +${delta} pontos</span><span style="color:var(--cyan)">sua trajetória melhora</span>`:delta<0?`<span style="color:#3FA9FF;font-weight:800">▼ ${delta} pontos</span><span style="color:var(--cyan)">atenção à trajetória</span>`:`<span style="color:var(--cyan)">trajetória estável</span>`}
+    </div>
+    <div style="font-size:10.5px;color:var(--cyan);text-align:center;margin-top:8px;line-height:1.4">${delta>0?`Mantendo o rumo, daqui a 6 meses você chega a ${escPred}. Gaste hoje como quem já está lá. 💪`:delta<0?`Sua trajetória cai para ${escPred} em 6 meses. Ajustar os gastos agora evita isso.`:`Seu comportamento se mantém estável nos próximos 6 meses.`}</div>`:`<div style="font-size:10.5px;color:var(--cyan);text-align:center;margin-top:10px">Mude o seletor para 18 meses para projetar o escore além do 6º mês.</div>`}
+  </div>`;
+}
 // ===== INCENTIVOS DIÁRIOS (eventos/viagens programados) =====
 // imagens temáticas (gradientes SVG inline — sem dependência externa) por tipo
 const TEMA_INCENTIVO={
@@ -731,6 +940,45 @@ G.abrirIncentivo=id=>{ tab="incentivo"; incEdit=id; render(); window.scrollTo(0,
 
 const miniRow=(l,v,c)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:13px"><span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:3px;background:${c}"></span>${l}</span><span style="font-weight:700;color:${c}">${fmt(v)}</span></div>`;
 const atalho=(ic,l,s,t,c)=>`<button class="card" onclick="_g.setTab('${t}')" style="padding:16px 14px;text-align:left;display:block;width:100%"><div style="font-size:22px">${ic}</div><div style="font-size:14.5px;font-weight:700;color:${c};margin-top:6px">${l}</div><div style="font-size:11px;color:var(--mute)">${s}</div></button>`;
+
+// ===== Ilustrações SVG inline (sem dependência externa) =====
+function svgCarteira(){
+  return `<svg width="46" height="40" viewBox="0 0 46 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="wl" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#8B7CF6"/><stop offset="50%" stop-color="#06B6D4"/><stop offset="100%" stop-color="#34D399"/></linearGradient></defs>
+    <rect x="6" y="10" width="34" height="24" rx="5" fill="url(#wl)"/>
+    <rect x="6" y="10" width="34" height="24" rx="5" fill="#000" opacity="0.08"/>
+    <path d="M6 15c0-2.8 2.2-5 5-5h22l-4 6H6z" fill="#A78BFA" opacity="0.9"/>
+    <rect x="26" y="18" width="16" height="10" rx="3" fill="#1E293B" opacity="0.85"/>
+    <circle cx="33" cy="23" r="2.4" fill="#CBD5E1"/>
+  </svg>`;
+}
+function svgGauge(frac){
+  // arco semicircular de 0 a 1
+  const a0=Math.PI, a1=Math.PI*(1-frac); // da esquerda (180º) subindo
+  const cx=30,cy=30,r=24;
+  const x0=cx+r*Math.cos(a0), y0=cy+r*Math.sin(a0);
+  const x1=cx+r*Math.cos(a1), y1=cy+r*Math.sin(a1);
+  const large=frac>0.5?1:0;
+  const xe=cx+r*Math.cos(0), ye=cy+r*Math.sin(0);
+  return `<svg width="60" height="34" viewBox="0 0 60 34" fill="none">
+    <path d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 0 1 ${xe.toFixed(1)} ${ye.toFixed(1)}" stroke="rgba(255,255,255,.18)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}" stroke="#34D399" stroke-width="5" stroke-linecap="round"/>
+  </svg>`;
+}
+function svgNotebook(){
+  return `<svg width="74" height="46" viewBox="0 0 74 46" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="scr" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#A78BFA"/><stop offset="60%" stop-color="#7C6FE8"/><stop offset="100%" stop-color="#5B8DEF"/></linearGradient>
+      <linearGradient id="sea" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#67E8F9"/><stop offset="100%" stop-color="#A78BFA"/></linearGradient></defs>
+    <path d="M16 34 L16 14 a3 3 0 0 1 3-3 h36 a3 3 0 0 1 3 3 v20z" fill="#E2E8F0"/>
+    <rect x="19" y="14" width="36" height="17" rx="1.5" fill="url(#scr)"/>
+    <path d="M19 31 h36 v0 l-5-7 -7 4 -6-6 -9 9z" fill="#fff" opacity="0.25"/>
+    <path d="M8 34 h58 a2 2 0 0 1 2 2 v1 a3 3 0 0 1 -3 3 H9 a3 3 0 0 1 -3-3 v-1 a2 2 0 0 1 2-2z" fill="#CBD5E1"/>
+    <ellipse cx="58" cy="22" rx="14" ry="9" fill="url(#sea)" opacity="0.35"/>
+  </svg>`;
+}
 
 // ===== AGENTE GUAVA =====
 let respostaAgente="";
@@ -882,18 +1130,29 @@ function viewDetalheMes(){
     <div class="card" style="background:var(--grad-dash);border:none;color:#fff">
       <div style="font-size:12px;color:var(--cyan);font-weight:700">${i===0?'ESTE MÊS':'DAQUI A '+i+(i===1?' MÊS':' MESES')}</div>
       <div style="font-size:24px;font-weight:800;margin:2px 0 10px">${x.mes}/${x.ano}</div>
-      <div style="display:flex;gap:16px">
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div><div style="font-size:10.5px;color:var(--cyan)">Renda do mês</div><div style="font-size:18px;font-weight:800;color:#fff">${fmt(x.rendaMes)}${x.extra>0?` <span style="font-size:11px;color:var(--ggreen)">+${fmt(x.extra)}</span>`:""}</div></div>
         <div><div style="font-size:10.5px;color:var(--cyan)">Gasto previsto</div><div style="font-size:18px;font-weight:800;color:${over?'var(--gpink)':'#fff'}">${fmt(x.total)}</div></div>
         <div><div style="font-size:10.5px;color:var(--cyan)">Saldo do mês</div><div style="font-size:18px;font-weight:800;color:${x.sobra>=0?'var(--ggreen)':'var(--gpink)'}">${x.sobra>=0?'+':''}${fmt(x.sobra)}</div></div>
       </div>
       ${over?`<div style="margin-top:10px;background:rgba(255,101,132,.2);border-radius:10px;padding:8px 10px;font-size:12px">⚠️ Neste mês os gastos ultrapassam a renda em ${fmt(-x.sobra)}. Veja abaixo o que mais pesa.</div>`:""}
     </div>
+    ${receitasDoMes(i)}
     ${sec("ordinaria","Fixas (ordinárias)",x.fixo)}
     ${sec("estimada","Estimadas",x.estimado)}
     ${sec("eventual","Eventuais deste mês",x.eventual)}
     ${sec("parcela","Parcelas do cartão",x.parcela)}
     ${x.parcela>0?`<div style="font-size:11.5px;color:var(--cyan);text-align:center;padding:2px 10px 10px">💡 As parcelas vão diminuindo conforme cada compra termina — veja a evolução voltando à projeção.</div>`:""}
   </div>`;
+}
+function receitasDoMes(i){
+  const rs=(state.receitas||[]).filter(r=>(+r.mesIdx||0)===i);
+  if(!rs.length) return "";
+  const total=rs.reduce((s,r)=>s+(+r.valor||0),0);
+  const linhas=rs.map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)"><div style="font-size:13.5px;font-weight:600">${r.nome}</div><div style="font-weight:700;font-size:13.5px;color:var(--emerald)">+${fmt(r.valor)}</div></div>`).join("");
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+    <span style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700"><span style="width:9px;height:9px;border-radius:3px;background:var(--ggreen)"></span>💰 Receitas extras deste mês</span>
+    <span style="font-weight:800;color:var(--emerald)">+${fmt(total)}</span></div>${linhas}</div>`;
 }
 G.verMes=i=>{ mesDetalhe=i; tab="detalheMes"; render(); window.scrollTo(0,0); };
 G.voltarProj=()=>{ tab="proj"; render(); window.scrollTo(0,0); };
@@ -1059,9 +1318,9 @@ function viewMetas(){
   const p=projecao(), m=p[0];
   const disponivel=state.renda-m.total, guardadoAlvo=state.renda*state.metaPct;
   const fechaMeta=disponivel>=guardadoAlvo, ajuste=guardadoAlvo-disponivel;
-  const botoes=[0.10,0.15,0.20,0.30].map(x=>{
+  const botoes=[0.01,0.05,0.10,0.15,0.20,0.30].map(x=>{
     const on=Math.abs(state.metaPct-x)<0.001;
-    return `<button onclick="_g.setMeta(${x})" style="flex:1;padding:13px 0;border-radius:11px;border:1.5px solid ${on?'var(--green)':'var(--line)'};background:${on?'var(--green)':'#fff'};color:${on?'#fff':'var(--ink)'};font-weight:700;font-size:15px">${(x*100).toFixed(0)}%</button>`;
+    return `<button onclick="_g.setMeta(${x})" style="padding:13px 0;border-radius:11px;border:1.5px solid ${on?'var(--green)':'var(--line)'};background:${on?'var(--green)':'#fff'};color:${on?'#fff':'var(--ink)'};font-weight:700;font-size:15px">${(x*100).toFixed(0)}%</button>`;
   }).join("");
   const row=(l,v,bold,cor)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;font-weight:${bold?800:400}"><span>${l}</span><span style="color:${cor||'var(--ink)'}">${fmt(v)}</span></div>`;
   const plano=fechaMeta
@@ -1069,7 +1328,7 @@ function viewMetas(){
     : `<li>Faltam <b>${fmt(ajuste)}</b>/mês. Reduza as estimadas para o piso da faixa.</li><li>Não abra novos parcelamentos (${fmt(m.parcela)}/mês ativos).</li><li>Antecipe eventuais guardando 1/12 por mês.</li>`;
   return `<div style="padding-top:16px"><h2 style="margin-bottom:12px">Metas & gasto ideal</h2>
     <div class="card"><div style="font-size:13px;font-weight:700;margin-bottom:10px">Quanto guardar por mês?</div>
-      <div style="display:flex;gap:8px">${botoes}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${botoes}</div>
       <div style="margin-top:12px;text-align:center;font-size:14px">meta: <b style="color:var(--green)">${fmt(guardadoAlvo)}</b>/mês</div></div>
     <div class="card">
       ${row("Renda mensal",state.renda,true,"var(--blue)")}${row("Ordinárias",-m.fixo)}${row("Estimadas (provável)",-m.estimado)}${row("Eventuais do mês",-m.eventual)}${row("Parcelas",-m.parcela,false,"var(--guava)")}
@@ -1128,8 +1387,35 @@ function viewAdd(){
   return `<div style="padding-top:16px"><h2 style="margin-bottom:4px">Adicionar despesa</h2>
     <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">fale, fotografe ou digite — tudo atualiza a projeção</div>
     <div style="display:flex;gap:8px;margin-bottom:14px">${tabBtn("texto","✍️ Texto")}${tabBtn("voz","🎙️ Voz")}${tabBtn("arquivo","📄 Fatura")}</div>
-    ${corpo}<div id="addStatus"></div><div id="addResult"></div></div>`;
+    ${corpo}<div id="addStatus"></div><div id="addResult"></div>
+    ${cardReceitaExtra()}</div>`;
 }
+// formulário de receita não recorrente (13º, PLR, bônus...)
+function cardReceitaExtra(){
+  const meses=[]; const now=new Date();
+  for(let i=0;i<state.horizonte;i++){ const d=new Date(now.getFullYear(),now.getMonth()+i,1); meses.push(`<option value="${i}">${MESES[d.getMonth()]}/${d.getFullYear()}${i===0?' (este mês)':''}</option>`); }
+  return `<div class="card" style="background:linear-gradient(155deg,#0E5C4E,#063D38);border:none;color:#fff;margin-top:8px">
+    <div style="font-size:14px;font-weight:800;display:flex;align-items:center;gap:7px">💰 Receita extra (não recorrente)</div>
+    <div style="font-size:11.5px;color:#7DE8D2;margin:4px 0 12px">13º, PLR, bônus, restituição... entra num mês específico e melhora o saldo e o escore daquele mês.</div>
+    <input id="recNome" placeholder="Ex: 13º salário" style="width:100%;border:none;border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px">
+    <div style="display:flex;gap:8px">
+      <input id="recValor" type="number" inputmode="numeric" placeholder="Valor R$" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px">
+      <select id="recMes" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;background:#fff">${meses}</select>
+    </div>
+    <button class="btnP" style="width:100%;margin-top:10px;background:var(--ggreen);color:#063" onclick="_g.addReceita()">adicionar receita</button>
+    ${(state.receitas||[]).length?`<div style="margin-top:12px">${state.receitas.map(r=>{const d=new Date(now.getFullYear(),now.getMonth()+(+r.mesIdx||0),1);return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.12)"><span style="font-size:13px">${r.nome} <span style="color:#7DE8D2;font-size:11px">${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}</span></span><span style="display:flex;align-items:center;gap:10px"><b style="color:var(--ggreen)">+${fmt(r.valor)}</b><button onclick="_g.delReceita('${r.id}')" style="background:none;border:none;color:var(--gpink);font-size:12px;font-weight:700">excluir</button></span></div>`;}).join("")}</div>`:""}
+  </div>`;
+}
+G.addReceita=()=>{
+  const nome=document.getElementById("recNome")?.value?.trim()||"Receita extra";
+  const valor=Number(document.getElementById("recValor")?.value)||0;
+  const mesIdx=Number(document.getElementById("recMes")?.value)||0;
+  if(valor<=0){ status("Informe um valor para a receita.",true); return; }
+  state.receitas=state.receitas||[];
+  state.receitas.push({id:"r"+Date.now(),nome,valor,mesIdx,cat:"Receita"});
+  salvar(); render(); status("Receita adicionada ✓ — veja o impacto na Projeção.",false);
+};
+G.delReceita=id=>{ state.receitas=(state.receitas||[]).filter(r=>r.id!==id); salvar(); render(); };
 function ligarAdd(){
   const ib=document.getElementById("interpBtn");
   if(ib) ib.onclick=()=>{ const t=(document.getElementById("txtInp").value||"").trim(); if(t) interpretar({texto:t}); };
@@ -1332,38 +1618,49 @@ function viewSaiba(){
 
   return `<div style="padding-top:16px">
     <h2 style="margin-bottom:4px">Saiba mais</h2>
-    <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">como o Guava funciona, em 4 partes</div>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">como o Guava funciona, em 6 partes</div>
 
     <!-- 1. Visão geral -->
     <div class="card">
-      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">1 · O QUE O GUAVA FAZ</div>
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">1 · O QUE O GUAVA FAZ</div>
       <div style="font-size:13px;color:var(--ink);line-height:1.6;margin:8px 0 4px">
-        O Guava transforma seus gastos numa <b>projeção de 12 a 18 meses</b>. Em vez de olhar só o mês atual, você enxerga o futuro do orçamento — principalmente o peso dos <b>parcelamentos</b>, que escondem o custo real de uma compra.
+        O Guava transforma seus gastos numa <b>projeção de 12 a 18 meses</b>. Em vez de olhar só o mês atual, você enxerga o futuro do orçamento — principalmente o peso dos <b>parcelamentos</b>, que escondem o custo real de uma compra. Você pode <b>tocar em cada mês</b> da projeção para ver as despesas detalhadas.
       </div>
       <div class="grid2" style="margin-top:10px;gap:10px">
-        ${chip("📊","Projeção","vê o saldo de cada mês à frente","var(--blue)")}
-        ${chip("💳","Parcelas","destaca o que está comprometido","var(--guava)")}
-        ${chip("🎯","Metas","define quanto guardar por mês","var(--green)")}
-        ${chip("🧮","Escore","mede a saúde do orçamento","var(--graphite)")}
+        ${chip("📊","Projeção","vê o saldo de cada mês à frente","var(--navy)")}
+        ${chip("💳","Parcelas","destaca o que está comprometido","var(--gpink)")}
+        ${chip("🎯","Metas","define quanto guardar por mês","var(--emerald)")}
+        ${chip("🔮","Escore preditivo","como estará daqui a 6 meses","var(--cyan)")}
       </div>
     </div>
 
     <!-- 2. As 4 naturezas de despesa -->
     <div class="card">
-      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">2 · COMO CLASSIFICAR OS GASTOS</div>
-      <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin:8px 0 12px">Cada despesa tem um comportamento diferente no tempo. O app separa em quatro tipos:</div>
-      ${[["Ordinária","#334155","recorrente e previsível (aluguel, escola). Repete todo mês."],
-         ["Estimada","#065F46","recorrente mas variável (luz, mercado). Você dá uma faixa mín–máx; o app usa a média."],
-         ["Eventual","#1E3A8A","cai num mês específico (IPVA, presente). Aparece só naquele mês."],
-         ["Parcela","#FA8072","parcelamento do cartão. Some da projeção quando a última parcela vence."]]
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">2 · COMO CLASSIFICAR OS GASTOS</div>
+      <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin:8px 0 12px">Cada despesa tem um comportamento diferente no tempo. O app separa em quatro tipos (e você pode reclassificar qualquer despesa ao editá-la):</div>
+      ${[["Ordinária","#0A2540","recorrente e previsível (aluguel, escola). Repete todo mês."],
+         ["Estimada","#639FAB","recorrente mas variável (luz, mercado). Você dá uma faixa mín–máx; o app usa a média."],
+         ["Eventual","#004B49","cai num mês específico (IPVA, presente). Aparece só naquele mês."],
+         ["Parcela","#FF6584","parcelamento do cartão. Some da projeção quando a última parcela vence."]]
         .map(([t,c,d])=>`<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
           <span style="width:10px;height:10px;border-radius:3px;background:${c};margin-top:4px;flex:none"></span>
           <div><b style="font-size:13.5px">${t}</b><div style="font-size:12px;color:var(--mute);line-height:1.45">${d}</div></div></div>`).join("")}
     </div>
 
-    <!-- 3. IA embarcada -->
+    <!-- 3. Receitas, escore preditivo, agente e incentivos -->
     <div class="card">
-      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">3 · A IA EMBARCADA</div>
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">3 · ALÉM DOS GASTOS</div>
+      <div style="margin-top:10px">
+        ${passo("💰","var(--emerald)","Receitas extras","13º, PLR, bônus ou restituição. Você vincula a um mês específico e o saldo daquele mês melhora — útil para planejar curto e longo prazo.")}
+        ${passo("🔮","var(--cyan)","Escore preditivo (6 meses)","além do escore de hoje, o app calcula como sua saúde financeira estará daqui a 6 meses. O comparativo te incentiva a já se comportar como o seu \"eu futuro\".")}
+        ${passo("🤖","var(--navy)","Pergunte ao Guava","um agente que responde análises: gastos por categoria, principais despesas dos próximos meses, e simulação de antecipar parcelas. Perguntas rápidas funcionam sem IA.")}
+        ${passo("✈️","var(--gpink)","Incentivos","cadastre viagens e eventos programados com foto/vídeo (link) e meta de poupança, para manter a motivação de economizar.")}
+      </div>
+    </div>
+
+    <!-- 4. IA embarcada -->
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">4 · A IA EMBARCADA</div>
       <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin:8px 0 12px">Você não precisa preencher formulários. Lança gastos de três jeitos, e a IA organiza:</div>
       ${passo("✍️","var(--graphite)","Texto","Escreve \"luz entre 300 e 500; sofá em 8x de 300\" e o app separa cada item.")}
       ${passo("🎙️","var(--blue)","Voz","Fala os gastos; o próprio celular transcreve e a IA interpreta.")}
@@ -1375,11 +1672,11 @@ function viewSaiba(){
       </div>
     </div>
 
-    <!-- 4. Modelo de escore -->
+    <!-- 5. Modelo de escore -->
     <div class="card">
-      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">4 · O ESCORE DE COMPORTAMENTO</div>
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">5 · O ESCORE DE COMPORTAMENTO</div>
       <div style="font-size:12.5px;color:var(--ink);line-height:1.6;margin:8px 0 10px">
-        Uma nota de <b>0 a 100</b> sobre a saúde do seu orçamento projetado. O alvo é o <b>GAP</b>: meses em que as despesas previstas superam a receita. Quanto menos GAP, maior a nota.
+        Uma nota de <b>0 a 100</b> sobre a saúde do seu orçamento projetado. O alvo é o <b>GAP</b>: meses em que as despesas previstas superam a receita. Quanto menos GAP, maior a nota. O <b>escore preditivo</b> usa a mesma fórmula, mas projetando a partir do 6º mês.
       </div>
       <div style="display:flex;gap:6px;margin-bottom:12px">
         ${[["0–39","Crítico","#FA8072"],["40–64","Atenção","#E0922F"],["65–84","Saudável","#3E8E5A"],["85–100","Excelente","#065F46"]]
@@ -1392,24 +1689,24 @@ function viewSaiba(){
          ["Parcelas sob controle","18%","ideal manter abaixo de 30% da renda"],
          ["Meta de poupança","14%","meses em que você bate a meta de guardar"]]
         .map(([t,p,d])=>`<div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)">
-          <span style="font-size:13px;font-weight:600">${t}</span><span style="font-size:13px;font-weight:800;color:var(--blue)">${p}</span></div>
+          <span style="font-size:13px;font-weight:600">${t}</span><span style="font-size:13px;font-weight:800;color:var(--emerald)">${p}</span></div>
           <div style="font-size:11px;color:var(--mute);margin:-2px 0 4px">${d}</div>`).join("")}
       <div style="background:var(--greenSoft);border-radius:10px;padding:12px;margin-top:10px">
         <div style="font-size:12px;color:var(--graphite);line-height:1.5">
-          💡 <b>O diferencial:</b> o escore também conta o <b>"quase-GAP"</b> — meses em que sobra fica abaixo da meta. Assim ele <b>avisa antes</b> de você entrar no vermelho, não depois.
+          💡 <b>O diferencial:</b> o escore também conta o <b>"quase-GAP"</b> — meses em que sobra fica abaixo da meta. Assim ele <b>avisa antes</b> de você entrar no vermelho, não depois. E guarda um histórico diário para recalibrar o modelo com seu comportamento real.
         </div>
       </div>
     </div>
 
-    <!-- 5. Gerenciar -->
+    <!-- 6. Gerenciar -->
     <div class="card">
-      <div style="font-size:11px;font-weight:700;color:var(--blue);letter-spacing:.3px">5 · GERENCIAR O APP</div>
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">6 · GERENCIAR O APP</div>
       <div style="margin-top:10px">
-        ${passo("＋","var(--green)","Adicionar","aba ➕ — lança gastos por texto, voz, foto ou PDF.")}
-        ${passo("✎","var(--blue)","Editar / excluir","aba 📂 Despesas — toque em editar ou excluir em cada item.")}
-        ${passo("✓","var(--green)","Marcar pago","em cada despesa, marque o que já pagou. Nas parcelas, o botão verde abate uma do total.")}
-        ${passo("📅","var(--graphite)","Fechar mês","em Despesas, registra previsto × pago no histórico e faz o escore considerar seu comportamento real.")}
-        ${passo("⚙","var(--graphite)","Configurar","ativa a IA (foto/PDF) e a sincronização entre aparelhos.")}
+        ${passo("＋","var(--emerald)","Adicionar","aba ➕ — lança gastos por texto, voz, foto ou PDF, e também receitas extras.")}
+        ${passo("✎","var(--navy)","Editar / reclassificar","aba 📂 Despesas — toque em editar para mudar valores ou até o tipo da despesa.")}
+        ${passo("✓","var(--emerald)","Marcar pago","em cada despesa, marque o que já pagou. Nas parcelas, o botão verde abate uma do total.")}
+        ${passo("📅","var(--cyan)","Fechar mês","em Despesas, registra previsto × pago no histórico e faz o escore considerar seu comportamento real.")}
+        ${passo("⚙","var(--navy)","Configurar","ativa a IA (foto/PDF), a sincronização e exporta a série histórica.")}
         ${passo("⬇","var(--mute)","Backup","⚙️ Configurar → exporta/importa seus dados num arquivo.")}
       </div>
       <div style="font-size:11.5px;color:var(--mute);line-height:1.5;margin-top:6px;border-top:1px solid var(--line);padding-top:10px">
@@ -1447,6 +1744,14 @@ function viewConfig(){
       <div style="font-size:12.5px;color:var(--mute);line-height:1.5;margin-bottom:8px">Opcional. Cole a URL da função publicada no Firebase. Sem isso, texto e voz funcionam no modo simples.</div>
       <input id="cfgFn" class="inp" inputmode="url" placeholder="https://southamerica-east1-...cloudfunctions.net/interpretarDespesa" value="${escapeAttr(cfg.funcaoUrl)}">
       <button id="salvarFn" class="btnP" style="width:100%;margin-top:10px">Salvar URL</button>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:4px">📈 Histórico para recalibragem</div>
+      <div style="font-size:12px;color:var(--mute);line-height:1.4;margin-bottom:10px">O Guava registra um retrato diário dos seus indicadores (gasto, escore, parcelas) formando uma série temporal. Com o tempo, esses dados permitem recalibrar o modelo de escore com seu comportamento real.</div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line)"><span style="color:var(--mute)">Retratos coletados</span><span style="font-weight:700">${(state.serieHistorica||[]).length}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0"><span style="color:var(--mute)">Desde</span><span style="font-weight:700">${(state.serieHistorica||[]).length?state.serieHistorica[0].data:"—"}</span></div>
+      <button id="exportarSerie" class="btnG" style="width:100%;margin-top:10px">📊 Exportar série histórica (CSV)</button>
     </div>
 
     <div class="card">
@@ -1493,6 +1798,14 @@ function ligarConfig(){
     a.download="guava-backup-"+new Date().toISOString().slice(0,10)+".json"; a.click();
   };
   document.getElementById("importarBtn").onclick=()=>document.getElementById("importarInp").click();
+  const btnSerie=document.getElementById("exportarSerie");
+  if(btnSerie) btnSerie.onclick=()=>{
+    const csv=exportarSerieCSV();
+    if(!csv){ alert("Ainda não há retratos suficientes. Use o app por alguns dias para formar a série."); return; }
+    const a=document.createElement("a");
+    a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+    a.download="guava-serie-"+new Date().toISOString().slice(0,10)+".csv"; a.click();
+  };
   document.getElementById("importarInp").onchange=e=>{
     const f=e.target.files&&e.target.files[0]; if(!f) return;
     const r=new FileReader(); r.onload=()=>{ try{ const obj=JSON.parse(r.result); state={...state,...obj}; salvar(); alert("Backup importado ✓"); render(); }catch{ alert("Arquivo inválido."); } };
@@ -1500,18 +1813,19 @@ function ligarConfig(){
   };
   document.getElementById("resetar").onclick=()=>{
     if(!confirm("Apagar todas as despesas e recomeçar com os exemplos?")) return;
-    state={renda:20000,metaPct:0.20,horizonte:12,itens:seed.slice()}; salvar(); render();
+    state={renda:20000,metaPct:0.20,horizonte:12,itens:seed.slice(),receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[]}; salvar(); render();
   };
 }
 
 // ---------- renda ----------
 document.getElementById("rendaBtn").onclick=()=>{
   const novo=prompt("Renda mensal (R$):",state.renda);
-  if(novo!==null){ const n=Number(String(novo).replace(/[^\d]/g,"")); if(n>0){ state.renda=n; salvar(); } }
+  if(novo!==null){ const n=Number(String(novo).replace(/[^\d]/g,"")); if(n>0){ state.renda=n; salvar(); render(); } }
 };
 
 // ---------- boot ----------
 carregarLocal();
+registrarSnapshot();
 render();
 iniciarFirebase();
 </script>
