@@ -128,7 +128,15 @@ const FUNCAO_URL_PADRAO = "";
 
 // ---------- estado ----------
 let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[]};
-let cfg={firebase:null,funcaoUrl:""};
+let cfg={firebase:{
+  apiKey:"AIzaSyDOEAOM9wRi1dUWLTMkxtvjpluEjaY2bCU",
+  authDomain:"guava-app-513a0.firebaseapp.com",
+  projectId:"guava-app-513a0",
+  storageBucket:"guava-app-513a0.firebasestorage.app",
+  messagingSenderId:"822533495254",
+  appId:"1:822533495254:web:3b03eaf63a06982df3ac77",
+  measurementId:"G-90GP5LNT3X"
+},funcaoUrl:""};
 let tab="inicio", modoAdd="texto", filtroDesp="todos";
 let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null, mesDetalhe=null, incEdit=null;
 let fb={app:null,db:null,auth:null,uid:null,ref:null,unsub:null};
@@ -182,7 +190,7 @@ const LS_STATE="guava_state_v1", LS_CFG="guava_cfg_v1";
 function carregarLocal(){
   try{ const s=localStorage.getItem(LS_STATE); if(s) state={...state,...JSON.parse(s)}; else state.itens=seed; }
   catch{ state.itens=seed; }
-  try{ const c=localStorage.getItem(LS_CFG); if(c) cfg={...cfg,...JSON.parse(c)}; }catch{}
+  try{ const c=localStorage.getItem(LS_CFG); if(c){ const padraoFb=cfg.firebase; cfg={...cfg,...JSON.parse(c)}; if(!cfg.firebase) cfg.firebase=padraoFb; } }catch{}
   // URL de fábrica: usada se o usuário ainda não definiu uma própria
   if(!cfg.funcaoUrl && FUNCAO_URL_PADRAO) cfg.funcaoUrl = FUNCAO_URL_PADRAO;
 }
