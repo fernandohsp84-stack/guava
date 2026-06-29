@@ -1777,15 +1777,33 @@ function viewConfig(){
 }
 function ligarConfig(){
   document.getElementById("salvarFb").onclick=()=>{
-    const raw=(document.getElementById("cfgFb").value||"").trim();
+    let raw=(document.getElementById("cfgFb").value||"").trim();
     if(!raw){ cfg.firebase=null; salvarCfg(); banner("Firebase removido."); render(); return; }
+    // tenta extrair só o objeto { ... }, aceitando o formato JS que o Firebase fornece
     try{
-      const obj=JSON.parse(raw.replace(/^const\s+firebaseConfig\s*=\s*/,"").replace(/;?\s*$/,""));
-      if(!obj.apiKey||!obj.projectId) throw new Error("faltam campos");
+      // 1) remove "const firebaseConfig =" e ponto-e-vírgula final, se houver
+      raw=raw.replace(/^\s*(?:const|let|var)\s+\w+\s*=\s*/,"").replace(/;?\s*$/,"");
+      // 2) isola do primeiro { ao último } (ignora texto solto antes/depois)
+      const a=raw.indexOf("{"), b=raw.lastIndexOf("}");
+      if(a>=0 && b>a) raw=raw.slice(a,b+1);
+      let obj;
+      try{ obj=JSON.parse(raw); }
+      catch{
+        // 3) formato JS: chaves sem aspas e/ou aspas simples → normaliza para JSON
+        let s=raw
+          .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g,'$1"$2":') // chaves sem aspas → "chave":
+          .replace(/'/g,'"')                                       // aspas simples → duplas
+          .replace(/,(\s*[}\]])/g,'$1');                           // vírgula sobrando antes de }
+        obj=JSON.parse(s);
+      }
+      if(!obj.apiKey||!obj.projectId){
+        alert("Faltam campos no que você colou. O bloco precisa conter as linhas apiKey e projectId — cole o bloco COMPLETO, do apiKey até o final.");
+        return;
+      }
       cfg.firebase=obj; salvarCfg();
       alert("Firebase salvo. O app vai recarregar para conectar.");
       location.reload();
-    }catch(e){ alert("Não consegui ler. Cole o objeto JSON completo, com apiKey e projectId."); }
+    }catch(e){ alert("Não consegui ler. Cole o bloco completo do Firebase, começando em apiKey e terminando em } — pode colar do jeito que o Firebase mostra."); }
   };
   document.getElementById("salvarFn").onclick=()=>{
     const u=(document.getElementById("cfgFn").value||"").trim();
