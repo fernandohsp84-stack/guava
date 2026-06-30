@@ -699,9 +699,7 @@ function viewInicio(){
       <span style="font-size:11.5px;font-weight:700;color:${state.horizonte===18?'#fff':'var(--cyan)'}">18 meses</span>
     </div>
     ${cardVisaoFuturo(p,esc)}
-    ${cardEscoresGrafico()}
-    ${cardEscore(esc)}
-    ${cardEscorePreditivo()}
+    ${cardAgente()}
     <div class="grid2">
       <div class="card" style="background:linear-gradient(155deg,#15406B,#0A2540);padding:15px 14px;border:none;color:#fff;position:relative;overflow:hidden">
         <div style="font-size:11px;font-weight:600;color:#C8D6E5">Disponível p/ gastar</div>
@@ -739,7 +737,9 @@ function viewInicio(){
       ${miniRow("Eventuais",m.eventual,"var(--emerald)")}
       ${miniRow("Parcelas do cartão",m.parcela,"var(--gpink)")}
     </div>
-    ${cardAgente()}
+    ${cardEscoresGrafico()}
+    ${cardEscore(esc)}
+    ${cardEscorePreditivo()}
     ${cardIncentivos()}
     ${semBackend?`<div style="font-size:12px;color:var(--cyan);text-align:center;padding:4px 10px 12px">💡 Texto e voz já funcionam. Para foto/PDF e sincronizar, toque em ⚙️ Configurar.</div>`:""}
   </div>`;
