@@ -1006,13 +1006,63 @@ function cardAgente(){
     <div style="font-size:11.5px;color:var(--cyan);margin-bottom:10px">Análises sobre seu orçamento${temIA?"":" · perguntas rápidas funcionam sem IA"}</div>
     <div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:4px">${chips}</div>
     <div style="display:flex;gap:7px;margin-top:10px">
-      <input id="agInput" placeholder="${temIA?'pergunte qualquer coisa...':'ative a IA p/ perguntas livres'}" ${temIA?'':'disabled'} style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;background:rgba(255,255,255,.92);color:var(--ink)">
-      <button onclick="_g.perguntarLivre()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;font-weight:700;padding:0 16px;border-radius:10px;font-size:14px;${temIA?'':'opacity:.5'}">▸</button>
+      <input id="agInput" placeholder="${temIA?'pergunte ou fale...':'ative a IA p/ perguntas livres'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:10px;padding:11px;font-size:14px;background:rgba(255,255,255,.92);color:var(--ink)">
+      <button id="agMic" onclick="_g.ouvirPergunta()" ${temIA?'':'disabled'} aria-label="falar" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;font-weight:700;padding:0 13px;border-radius:10px;font-size:16px;${temIA?'':'opacity:.5'}">🎙️</button>
+      <button onclick="_g.perguntarLivre()" ${temIA?'':'disabled'} aria-label="enviar" style="background:var(--gpink);border:none;color:#fff;font-weight:700;padding:0 15px;border-radius:10px;font-size:14px;${temIA?'':'opacity:.5'}">▸</button>
     </div>
     <div id="agResp">${respostaAgente}</div>
   </div>`;
 }
-function bolha(html){ return `<div style="margin-top:12px;background:rgba(255,255,255,.95);color:var(--ink);border-radius:14px;padding:13px 14px;font-size:13.5px;line-height:1.5">${html}</div>`; }
+function bolha(html){ return `<div style="margin-top:12px;background:#fff;color:var(--ink);border-radius:16px;padding:14px 15px;font-size:13.5px;line-height:1.55;box-shadow:0 4px 16px rgba(0,0,0,.12)">${html}</div>`; }
+
+// Converte a resposta da IA (Markdown) em HTML estilizado com a cara do app
+function mdParaHtml(md){
+  if(!md) return "";
+  const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const inline=s=>esc(s)
+    .replace(/\*\*(.+?)\*\*/g,'<b style="color:var(--navy)">$1</b>')
+    .replace(/(^|[^*])\*([^*]+?)\*/g,'$1<i>$2</i>')
+    .replace(/`(.+?)`/g,'<code style="background:#EEF2F4;padding:1px 5px;border-radius:5px;font-size:12px">$1</code>')
+    .replace(/R\$ ?([\d.,]+)/g,'<span style="color:var(--emerald);font-weight:700">R$ $1</span>');
+  const linhas=md.split("\n");
+  let out=[], i=0;
+  while(i<linhas.length){
+    let l=linhas[i];
+    // tabela markdown
+    if(/^\s*\|.*\|/.test(l) && i+1<linhas.length && /^\s*\|[\s:|-]+\|/.test(linhas[i+1])){
+      const head=l.split("|").filter(c=>c.trim()).map(c=>c.trim());
+      i+=2; const rows=[];
+      while(i<linhas.length && /^\s*\|.*\|/.test(linhas[i])){ rows.push(linhas[i].split("|").filter(c=>c.trim()).map(c=>c.trim())); i++; }
+      let t=`<div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:10px 0">`;
+      rows.forEach((r,ri)=>{
+        t+=`<div style="display:flex;justify-content:space-between;gap:8px;padding:9px 12px;${ri<rows.length-1?'border-bottom:1px solid var(--line);':''}background:${ri%2?'#F7FAFB':'#fff'}">`;
+        r.forEach((cel,ci)=>{ t+=`<span style="${ci===0?'font-weight:600;flex:1':'font-weight:700;color:var(--emerald);text-align:right'};font-size:13px">${inline(cel)}</span>`; });
+        t+=`</div>`;
+      });
+      t+=`</div>`; out.push(t); continue;
+    }
+    // títulos ##
+    if(/^#{1,6}\s/.test(l)){ out.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin:12px 0 6px">${inline(l.replace(/^#+\s/,""))}</div>`); i++; continue; }
+    // divisória ---
+    if(/^\s*---+\s*$/.test(l)){ out.push(`<div style="height:1px;background:var(--line);margin:12px 0"></div>`); i++; continue; }
+    // dica/destaque (linha que começa com 💡 ou "Dica")
+    if(/^\s*(💡|\*\*?💡)/.test(l) || /dica/i.test(l.slice(0,12))){
+      out.push(`<div style="background:var(--greenSoft);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:12.5px;line-height:1.5">${inline(l.replace(/^\s*-\s*/,""))}</div>`); i++; continue;
+    }
+    // lista com - ou •
+    if(/^\s*[-•]\s/.test(l)){
+      let items=[];
+      while(i<linhas.length && /^\s*[-•]\s/.test(linhas[i])){ items.push(linhas[i].replace(/^\s*[-•]\s/,"")); i++; }
+      out.push(`<div style="display:flex;flex-direction:column;gap:6px;margin:6px 0">${items.map(it=>`<div style="display:flex;gap:8px;font-size:13px"><span style="color:var(--gpink);font-weight:800">•</span><span>${inline(it)}</span></div>`).join("")}</div>`);
+      continue;
+    }
+    // linha vazia
+    if(/^\s*$/.test(l)){ i++; continue; }
+    // parágrafo normal
+    out.push(`<div style="font-size:13.5px;line-height:1.55;margin:4px 0">${inline(l)}</div>`); i++;
+  }
+  return out.join("");
+}
 G.perguntar=q=>{
   let html="";
   if(q==="cat"){
@@ -1047,6 +1097,22 @@ G.simAntec=id=>{
   respostaAgente=bolha(html);
   const el=document.getElementById("agResp"); if(el) el.innerHTML=respostaAgente;
 };
+let ouvindoAg=false, recAg=null;
+G.ouvirPergunta=()=>{
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const mic=document.getElementById("agMic"), inp=document.getElementById("agInput");
+  if(!SR){ if(inp) inp.placeholder="voz indisponível — digite a pergunta"; return; }
+  if(ouvindoAg){ recAg&&recAg.stop(); return; }
+  recAg=new SR(); recAg.lang="pt-BR"; recAg.continuous=true; recAg.interimResults=true;
+  recAg.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; if(inp) inp.value=t; };
+  recAg.onend=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; }
+    // ao terminar de falar, se houver texto, pergunta automaticamente
+    if(inp && inp.value.trim()) G.perguntarLivre();
+  };
+  recAg.onerror=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; } };
+  recAg.start(); ouvindoAg=true;
+  if(mic){ mic.textContent="⏹"; mic.style.background="var(--gpink)"; }
+};
 G.perguntarLivre=async()=>{
   const inp=document.getElementById("agInput"); const pergunta=(inp&&inp.value||"").trim();
   if(!pergunta) return;
@@ -1058,7 +1124,7 @@ G.perguntarLivre=async()=>{
       body:JSON.stringify({pergunta, dados:Analise.resumoParaIA()})});
     const d=await r.json();
     const txt=d.resposta||d.texto||JSON.stringify(d);
-    respostaAgente=bolha(txt.replace(/\n/g,"<br>"));
+    respostaAgente=bolha(mdParaHtml(txt));
   }catch(e){ respostaAgente=bolha("Não consegui consultar a IA agora. Tente as perguntas rápidas acima."); }
   document.getElementById("agResp").innerHTML=respostaAgente;
 };
