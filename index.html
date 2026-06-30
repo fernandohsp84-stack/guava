@@ -700,6 +700,8 @@ function viewInicio(){
     </div>
     ${cardVisaoFuturo(p,esc)}
     ${cardEscoresGrafico()}
+    ${cardEscore(esc)}
+    ${cardEscorePreditivo()}
     <div class="grid2">
       <div class="card" style="background:linear-gradient(155deg,#15406B,#0A2540);padding:15px 14px;border:none;color:#fff;position:relative;overflow:hidden">
         <div style="font-size:11px;font-weight:600;color:#C8D6E5">Disponível p/ gastar</div>
@@ -730,20 +732,12 @@ function viewInicio(){
         <span>${fmt(0)}</span><span>${fmt(state.renda)}</span>
       </div>
     </div>
-    ${cardEscore(esc)}
-    ${cardEscorePreditivo()}
     <div class="card">
       <div style="font-size:12.5px;font-weight:700;color:var(--navy);margin-bottom:8px">Composição deste mês</div>
       ${miniRow("Ordinárias (fixas)",m.fixo,"var(--navy)")}
       ${miniRow("Estimadas (a confirmar)",m.estimado,"var(--cyan)")}
       ${miniRow("Eventuais",m.eventual,"var(--emerald)")}
       ${miniRow("Parcelas do cartão",m.parcela,"var(--gpink)")}
-    </div>
-    <div class="grid2">
-      ${atalho("📊","Projeção",`${p.length} meses`,"proj","var(--navy)")}
-      ${atalho("📂","Despesas","incluir / editar","despesas","var(--emerald)")}
-      ${atalho("🎯","Metas",fechaMeta?"no alvo":"ajustar","metas","var(--emerald)")}
-      ${atalho("⚙️","Configurar",semBackend?"ativar IA + sync":"conta / IA","config","var(--cyan)")}
     </div>
     ${cardAgente()}
     ${cardIncentivos()}
@@ -950,6 +944,14 @@ const miniRow=(l,v,c)=>`<div style="display:flex;justify-content:space-between;p
 const atalho=(ic,l,s,t,c)=>`<button class="card" onclick="_g.setTab('${t}')" style="padding:16px 14px;text-align:left;display:block;width:100%"><div style="font-size:22px">${ic}</div><div style="font-size:14.5px;font-weight:700;color:${c};margin-top:6px">${l}</div><div style="font-size:11px;color:var(--mute)">${s}</div></button>`;
 
 // ===== Ilustrações SVG inline (sem dependência externa) =====
+function svgGoiaba(tam){
+  const s=tam||26;
+  return `<svg width="${s}" height="${s}" viewBox="0 0 30 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="GuavAI" style="flex:none">
+    <path d="M16.4 5.2c1.6-2.1 4.1-3 6.2-2.7-.2 2.1-1.5 4.2-3.6 5.1-1 .4-2 .5-2.9.3" fill="#00C49F"/>
+    <path d="M15 7.3c-.7 0-1.3.3-1.9.7C8.7 8.7 5 12.9 5 18.3 5 24.2 9.5 29 15 29s10-4.8 10-10.7c0-5.4-3.7-9.6-8.1-10.3-.6-.4-1.2-.7-1.9-.7z" fill="#3FD9BC"/>
+    <ellipse cx="11.3" cy="16" rx="2.4" ry="3.4" fill="#7DE8D2" opacity=".6"/>
+  </svg>`;
+}
 function svgCarteira(){
   return `<svg width="46" height="40" viewBox="0 0 46 40" fill="none" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="wl" x1="0" y1="0" x2="1" y2="1">
@@ -999,11 +1001,14 @@ function cardAgente(){
     ["⏩ Simular antecipar parcelas","antec"],
   ].map(([txt,q])=>`<button onclick="_g.perguntar('${q}')" style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 12px;border-radius:20px;white-space:nowrap">${txt}</button>`).join("");
   return `<div class="card" style="background:var(--grad-dash);border:none;color:#fff">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-      <span style="font-size:20px">🤖</span>
-      <span style="font-size:15px;font-weight:800">Pergunte ao Guava</span>
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px">
+      ${svgGoiaba(26)}
+      <div>
+        <span style="font-size:16px;font-weight:800">GuavAI</span>
+        <span style="font-size:11px;color:var(--cyan);font-weight:600;margin-left:6px">seu copiloto financeiro</span>
+      </div>
     </div>
-    <div style="font-size:11.5px;color:var(--cyan);margin-bottom:10px">Análises sobre seu orçamento${temIA?"":" · perguntas rápidas funcionam sem IA"}</div>
+    <div style="font-size:11.5px;color:var(--cyan);margin-bottom:10px">Pergunte sobre seu orçamento${temIA?"":" · perguntas rápidas funcionam sem IA"}</div>
     <div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:4px">${chips}</div>
     <div style="display:flex;gap:7px;margin-top:10px">
       <input id="agInput" placeholder="${temIA?'pergunte ou fale...':'ative a IA p/ perguntas livres'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:10px;padding:11px;font-size:14px;background:rgba(255,255,255,.92);color:var(--ink)">
@@ -1101,17 +1106,25 @@ let ouvindoAg=false, recAg=null;
 G.ouvirPergunta=()=>{
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   const mic=document.getElementById("agMic"), inp=document.getElementById("agInput");
-  if(!SR){ if(inp) inp.placeholder="voz indisponível — digite a pergunta"; return; }
-  if(ouvindoAg){ recAg&&recAg.stop(); return; }
-  recAg=new SR(); recAg.lang="pt-BR"; recAg.continuous=true; recAg.interimResults=true;
-  recAg.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; if(inp) inp.value=t; };
-  recAg.onend=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; }
-    // ao terminar de falar, se houver texto, pergunta automaticamente
-    if(inp && inp.value.trim()) G.perguntarLivre();
-  };
-  recAg.onerror=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; } };
-  recAg.start(); ouvindoAg=true;
-  if(mic){ mic.textContent="⏹"; mic.style.background="var(--gpink)"; }
+  if(!SR){ if(inp){ inp.placeholder="voz indisponível neste navegador — digite"; } return; }
+  if(ouvindoAg){ try{recAg&&recAg.stop();}catch{} return; }
+  try{
+    recAg=new SR(); recAg.lang="pt-BR";
+    recAg.continuous=false;      // iOS Safari é mais estável com frase única
+    recAg.interimResults=true;
+    recAg.maxAlternatives=1;
+    let captou=false;
+    recAg.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; if(inp){ inp.value=t; captou=!!t.trim(); } };
+    recAg.onend=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; }
+      if(captou && inp && inp.value.trim()) G.perguntarLivre();
+    };
+    recAg.onerror=ev=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; }
+      if(ev&&ev.error==="not-allowed" && inp){ inp.placeholder="permita o microfone nos ajustes do Safari"; }
+      else if(ev&&ev.error==="no-speech" && inp){ inp.placeholder="não ouvi nada — toque e fale de novo"; }
+    };
+    recAg.start(); ouvindoAg=true;
+    if(mic){ mic.textContent="⏹"; mic.style.background="var(--gpink)"; }
+  }catch(e){ ouvindoAg=false; if(inp){ inp.placeholder="não consegui ativar o microfone — digite"; } }
 };
 G.perguntarLivre=async()=>{
   const inp=document.getElementById("agInput"); const pergunta=(inp&&inp.value||"").trim();
@@ -1447,8 +1460,9 @@ function viewAdd(){
       : `<div class="card" style="text-align:center;padding:24px 16px">
            <div style="font-size:34px">📑</div>
            <div style="font-size:13.5px;margin:10px 0 14px;color:var(--mute)">Envie a fatura em <b>PDF</b> ou foto. A IA lê cada linha e classifica.</div>
-           <input id="fileInp" type="file" accept="image/*,application/pdf" capture="environment" style="display:none">
-           <button class="btnP" onclick="document.getElementById('fileInp').click()">📎 Escolher PDF ou foto</button></div>`;
+           <input id="fileInp" type="file" accept="image/*,application/pdf" style="display:none">
+           <button class="btnP" onclick="document.getElementById('fileInp').click()">📎 Escolher PDF ou foto</button>
+           <div style="font-size:11px;color:var(--mute);text-align:center;margin-top:8px">toque para tirar foto, escolher da galeria ou anexar um PDF</div></div>`;
   } else {
     const dica = cfg.funcaoUrl ? "a IA classifica automaticamente" : "modo simples (sem IA): use o formato dos exemplos";
     corpo = `<div class="card">
@@ -1524,10 +1538,24 @@ function status(msg,erro){
 
 // ---- interpretação: usa a função de IA se houver; senão, parser local ----
 async function interpretar(payload){
-  if(payload.texto && !cfg.funcaoUrl){
+  // TEXTO digitado: tenta sempre o parser local primeiro (rápido, sem custo de IA).
+  if(payload.texto){
     const itens=parseLocal(payload.texto);
-    if(itens.length){ mostrarResultado(itens); status("",false); }
-    else status("No modo simples, escreva como nos exemplos: \"luz entre 300 e 500\", \"IPVA 2400 em março\", \"sofá em 8x de 300\". Para texto livre/foto/PDF, ative a IA em ⚙️.",true);
+    if(itens.length){ mostrarResultado(itens); status("",false); return; }
+    // não entendeu localmente: se houver IA, tenta interpretar como texto livre
+    if(!cfg.funcaoUrl){
+      status("No modo simples, escreva como nos exemplos: \"luz entre 300 e 500\", \"IPVA 2400 em março\", \"sofá em 8x de 300\". Separe vários com ponto e vírgula.",true);
+      return;
+    }
+    // fallback IA para texto livre
+    status("🤖 interpretando…",false);
+    try{
+      const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({extrairTexto:payload.texto})});
+      const data=await r.json();
+      const itensIA=extrairItensDaResposta(data);
+      if(itensIA.length){ status("",false); mostrarResultado(itensIA); }
+      else status("Não consegui identificar despesas. Tente algo como \"mercado 950; luz 200; farmácia 80\".",true);
+    }catch(e){ status("Não consegui interpretar agora. Tente o formato \"mercado 950; luz 200\".",true); }
     return;
   }
   if((payload.imagemBase64||payload.pdfBase64) && !cfg.funcaoUrl){
@@ -1539,11 +1567,27 @@ async function interpretar(payload){
     const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     const data=await r.json();
     if(!r.ok) throw new Error(data.erro||"falha");
-    if(!data.itens||!data.itens.length) throw new Error("nada encontrado");
-    status("",false); mostrarResultado(data.itens);
+    const itens=extrairItensDaResposta(data);
+    if(!itens.length) throw new Error("nada encontrado");
+    status("",false); mostrarResultado(itens);
   }catch(e){
-    status("Não consegui interpretar. Tente algo simples como \"luz entre 300 e 500\" ou \"TV em 10x de 280\". (Se acabou de configurar a IA, confira a URL em ⚙️.)",true);
+    status("Não consegui interpretar. Tente algo simples como \"luz entre 300 e 500\" ou \"TV em 10x de 280\".",true);
   }
+}
+// extrai itens da resposta da IA, seja {itens:[...]} ou {resposta:"...json..."}
+function extrairItensDaResposta(data){
+  if(!data) return [];
+  if(Array.isArray(data.itens)) return data.itens;
+  // a função pode devolver o JSON dentro de um texto
+  const txt=data.resposta||data.texto||"";
+  if(typeof txt==="string" && txt.trim()){
+    try{
+      const m=txt.match(/\[[\s\S]*\]/);
+      if(m){ const arr=JSON.parse(m[0]); if(Array.isArray(arr)) return arr; }
+      const obj=JSON.parse(txt); if(Array.isArray(obj.itens)) return obj.itens;
+    }catch{}
+  }
+  return [];
 }
 
 // parser local simples (sem IA) — cobre os formatos dos exemplos
