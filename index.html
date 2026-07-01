@@ -32,6 +32,19 @@
   .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px;animation:pop .25s ease both;box-shadow:0 6px 20px rgba(10,37,64,.06)}
   @keyframes pop{0%{transform:translateY(8px);opacity:0}100%{transform:none;opacity:1}}
   @keyframes slideIn{0%{transform:translateX(12px);opacity:0}100%{transform:none;opacity:1}}
+  /* Orbe GuavAI — máquina de estados */
+  @keyframes orbeIdle{0%,100%{transform:scale(0.98)}50%{transform:scale(1.02)}}
+  @keyframes orbeListen{0%,100%{transform:scale(1)}25%{transform:scale(1.08)}60%{transform:scale(0.96)}}
+  @keyframes orbeCompute{0%{transform:rotate(0deg) scale(1)}100%{transform:rotate(360deg) scale(1)}}
+  @keyframes orbeAlert{0%{transform:scale(1)}15%{transform:scale(0.88)}30%{transform:scale(1.04)}100%{transform:scale(1)}}
+  @keyframes orbeRipple{0%{transform:scale(0.6);opacity:.6}100%{transform:scale(2.2);opacity:0}}
+  .orbe{border-radius:50%;position:relative;transition:background .4s}
+  .orbe.idle{animation:orbeIdle 3s ease-in-out infinite}
+  .orbe.listening{animation:orbeListen 1.1s ease-in-out infinite}
+  .orbe.computing{animation:orbeCompute 1.4s linear infinite}
+  .orbe.alert{animation:orbeAlert .9s ease-in-out infinite}
+  .orbe .ripple{position:absolute;inset:0;border-radius:50%;pointer-events:none}
+  .orbe.alert .ripple{animation:orbeRipple 1.1s ease-out infinite;border:2px solid #FF6584}
   main.swap{animation:slideIn .22s ease both}
   @media(prefers-reduced-motion:reduce){.card,main.swap{animation:none}}
   h2{font-size:20px;font-weight:800;letter-spacing:-.3px;color:#fff}
@@ -139,6 +152,8 @@ let cfg={firebase:{
 },funcaoUrl:""};
 let tab="inicio", modoAdd="texto", filtroDesp="todos";
 let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null, mesDetalhe=null, incEdit=null;
+let storyAtivo=false, storyStep=0, storyTimer=null;
+let chatAberto=false, chatMsgs=[], chatEstado="idle";
 let fb={app:null,db:null,auth:null,uid:null,ref:null,unsub:null};
 
 const seed=[
@@ -944,6 +959,30 @@ const miniRow=(l,v,c)=>`<div style="display:flex;justify-content:space-between;p
 const atalho=(ic,l,s,t,c)=>`<button class="card" onclick="_g.setTab('${t}')" style="padding:16px 14px;text-align:left;display:block;width:100%"><div style="font-size:22px">${ic}</div><div style="font-size:14.5px;font-weight:700;color:${c};margin-top:6px">${l}</div><div style="font-size:11px;color:var(--mute)">${s}</div></button>`;
 
 // ===== Ilustrações SVG inline (sem dependência externa) =====
+// Orbe dinâmico do GuavAI — reflete o estado (idle/listening/computing/alert)
+const ORBE_CORES={
+  idle:["#0A2540","#639FAB"],
+  listening:["#639FAB","#00C49F"],
+  computing:["#004B49","#00C49F"],
+  alert:["#FF6584","#7C2D49"],
+};
+function orbeGuavAI(estado,tam){
+  const s=tam||30, e=estado||"idle", [c1,c2]=ORBE_CORES[e]||ORBE_CORES.idle;
+  const glow = e==="listening"||e==="computing" ? `box-shadow:0 0 ${s*0.5}px ${c2}aa,0 0 ${s*0.9}px ${c2}55;` : e==="alert" ? `box-shadow:0 0 ${s*0.5}px #FF6584aa;` : "";
+  return `<div class="orbe ${e}" id="orbeGuav" style="width:${s}px;height:${s}px;flex:none;background:radial-gradient(circle at 35% 30%, ${c2}, ${c1} 75%);${glow}">
+    <div class="ripple"></div>
+    <div style="position:absolute;top:26%;left:28%;width:${s*0.28}px;height:${s*0.28}px;border-radius:50%;background:rgba(255,255,255,.55);filter:blur(1px)"></div>
+  </div>`;
+}
+// define o estado do orbe já renderizado (sem re-render da tela toda)
+function setOrbe(estado){
+  const o=document.getElementById("orbeGuav"); if(!o) return;
+  o.className="orbe "+estado;
+  const [c1,c2]=ORBE_CORES[estado]||ORBE_CORES.idle;
+  o.style.background=`radial-gradient(circle at 35% 30%, ${c2}, ${c1} 75%)`;
+  const s=o.offsetWidth||30;
+  o.style.boxShadow = (estado==="listening"||estado==="computing") ? `0 0 ${s*0.5}px ${c2}aa,0 0 ${s*0.9}px ${c2}55` : estado==="alert" ? `0 0 ${s*0.5}px #FF6584aa` : "";
+}
 function svgGoiaba(tam){
   const s=tam||26;
   return `<svg width="${s}" height="${s}" viewBox="0 0 30 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="GuavAI" style="flex:none">
@@ -1000,24 +1039,125 @@ function cardAgente(){
     ["💳 Quando as parcelas aliviam","parc"],
     ["⏩ Simular antecipar parcelas","antec"],
   ].map(([txt,q])=>`<button onclick="_g.perguntar('${q}')" style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 12px;border-radius:20px;white-space:nowrap">${txt}</button>`).join("");
-  return `<div class="card" style="background:var(--grad-dash);border:none;color:#fff">
-    <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px">
-      ${svgGoiaba(26)}
-      <div>
-        <span style="font-size:16px;font-weight:800">GuavAI</span>
-        <span style="font-size:11px;color:var(--cyan);font-weight:600;margin-left:6px">seu copiloto financeiro</span>
+  const escAg=calcularEscore(projecao(),state.renda,state.metaPct);
+  const estadoInicial = escAg.gapMeses>0 ? "alert" : "idle";
+  return `<div class="card" style="background:var(--grad-dash);border:none;color:#fff;position:relative;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:12px">
+      ${orbeGuavAI(estadoInicial,44)}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:17px;font-weight:800">GuavAI</div>
+        <div style="font-size:11.5px;color:var(--cyan)">${escAg.gapMeses>0?'⚠️ detectei meses com déficit':'seu copiloto financeiro'}</div>
       </div>
     </div>
-    <div style="font-size:11.5px;color:var(--cyan);margin-bottom:10px">Pergunte sobre seu orçamento${temIA?"":" · perguntas rápidas funcionam sem IA"}</div>
-    <div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:4px">${chips}</div>
-    <div style="display:flex;gap:7px;margin-top:10px">
-      <input id="agInput" placeholder="${temIA?'pergunte ou fale...':'ative a IA p/ perguntas livres'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:10px;padding:11px;font-size:14px;background:rgba(255,255,255,.92);color:var(--ink)">
-      <button id="agMic" onclick="_g.ouvirPergunta()" ${temIA?'':'disabled'} aria-label="falar" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;font-weight:700;padding:0 13px;border-radius:10px;font-size:16px;${temIA?'':'opacity:.5'}">🎙️</button>
-      <button onclick="_g.perguntarLivre()" ${temIA?'':'disabled'} aria-label="enviar" style="background:var(--gpink);border:none;color:#fff;font-weight:700;padding:0 15px;border-radius:10px;font-size:14px;${temIA?'':'opacity:.5'}">▸</button>
-    </div>
-    <div id="agResp">${respostaAgente}</div>
+    <button onclick="_g.abrirChat()" style="width:100%;margin-top:12px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);color:#fff;font-weight:600;padding:12px 14px;border-radius:14px;font-size:13.5px;display:flex;align-items:center;justify-content:space-between">
+      <span style="color:rgba(255,255,255,.7)">${temIA?'Converse com o GuavAI…':'ative a IA p/ conversar'}</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <span style="background:rgba(255,255,255,.12);width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px">🎙️</span>
+        <span style="background:var(--gpink);width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px">▸</span>
+      </span>
+    </button>
+    <button onclick="_g.abrirStory()" style="width:100%;background:linear-gradient(90deg,#00C49F,#639FAB);border:none;color:#062;font-weight:800;padding:11px;border-radius:12px;font-size:13.5px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:8px">▶ Ver sua projeção em Stories</button>
   </div>`;
 }
+
+// ===== Experiência conversacional em tela cheia (estilo Siri) =====
+G.abrirChat=()=>{
+  if(!cfg.funcaoUrl){ /* sem IA: ainda permite perguntas rápidas */ }
+  chatAberto=true; chatEstado="idle";
+  if(!chatMsgs.length){
+    const esc=calcularEscore(projecao(),state.renda,state.metaPct);
+    chatMsgs=[{de:"ia", html:`Olá! Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Como posso ajudar hoje?`}];
+  }
+  document.body.insertAdjacentHTML("beforeend", renderChat());
+  document.body.style.overflow="hidden";
+};
+G.fecharChat=()=>{
+  chatAberto=false; document.body.style.overflow="";
+  const ov=document.getElementById("chatOv"); if(ov) ov.remove();
+  if(recAg){ try{recAg.stop();}catch{} }
+};
+function renderChat(){
+  const [c1,c2]=ORBE_CORES[chatEstado]||ORBE_CORES.idle;
+  const sugestoes=[
+    ["📊 Gastos por categoria","cat"],["🍽️ Alimentação 3 meses","alim3"],
+    ["💳 Quando as parcelas aliviam","parc"],["⏩ Antecipar parcelas","antec"],
+  ];
+  const temIA=!!cfg.funcaoUrl;
+  const orbeGrande = chatEstado!=="idle" || chatMsgs.length<=1;
+  const tamOrbe = orbeGrande ? 96 : 52;
+  const baloes = chatMsgs.map(m=> m.de==="user"
+    ? `<div style="align-self:flex-end;max-width:82%;background:var(--gpink);color:#fff;padding:11px 14px;border-radius:18px 18px 4px 18px;font-size:14px;line-height:1.45;box-shadow:0 2px 10px rgba(255,101,132,.3)">${m.html}</div>`
+    : `<div style="align-self:flex-start;max-width:88%;background:#fff;color:var(--ink);padding:12px 15px;border-radius:18px 18px 18px 4px;font-size:13.5px;line-height:1.5;box-shadow:0 3px 14px rgba(0,0,0,.12)">${m.html}</div>`
+  ).join("");
+  const rotuloEstado = chatEstado==="listening"?"ouvindo…":chatEstado==="computing"?"pensando…":"";
+  return `<div id="chatOv" style="position:fixed;inset:0;z-index:210;background:linear-gradient(180deg,${c1} 0%,#0A2540 40%,#081826 100%);display:flex;flex-direction:column;animation:slideIn .3s">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:calc(12px + env(safe-area-inset-top)) 16px 8px">
+      <span style="color:#fff;font-weight:800;font-size:16px">GuavAI</span>
+      <button onclick="_g.fecharChat()" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px">✕</button>
+    </div>
+    <div id="chatOrbe" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:${orbeGrande?'20px':'8px'} 0;transition:padding .4s">
+      ${orbeGuavAI(chatEstado,tamOrbe)}
+      ${rotuloEstado?`<div style="color:${c2};font-size:12px;font-weight:600;margin-top:10px;letter-spacing:.3px">${rotuloEstado}</div>`:""}
+    </div>
+    <div id="chatMsgs" style="flex:1;overflow-y:auto;padding:8px 16px 12px;display:flex;flex-direction:column;gap:10px">
+      ${baloes}
+    </div>
+    ${chatMsgs.length<=1?`<div style="padding:0 12px 8px;display:flex;gap:7px;overflow-x:auto">${sugestoes.map(([t,q])=>`<button onclick="_g.chatRapida('${q}')" style="white-space:nowrap;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 13px;border-radius:20px">${t}</button>`).join("")}</div>`:""}
+    <div style="padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:rgba(8,24,38,.6);backdrop-filter:blur(10px)">
+      <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'pergunte ou toque no microfone…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:22px;padding:13px 16px;font-size:14px;background:rgba(255,255,255,.95);color:var(--ink)">
+      <button id="chatMic" onclick="_g.chatOuvir()" ${temIA?'':'disabled'} style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:19px;flex:none;${temIA?'':'opacity:.4'}">🎙️</button>
+      <button onclick="_g.chatEnviar()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">▸</button>
+    </div>
+  </div>`;
+}
+function atualizarChat(){
+  const ov=document.getElementById("chatOv"); if(!ov) return;
+  ov.outerHTML=renderChat();
+  const box=document.getElementById("chatMsgs"); if(box) box.scrollTop=box.scrollHeight;
+}
+function setChatEstado(e){ chatEstado=e; const o=document.getElementById("chatOv"); if(o){ atualizarChat(); } }
+G.chatEnviar=async()=>{
+  const inp=document.getElementById("chatInput"); const q=(inp&&inp.value||"").trim();
+  if(!q) return;
+  chatMsgs.push({de:"user", html:q.replace(/</g,"&lt;")});
+  if(inp) inp.value="";
+  if(!cfg.funcaoUrl){ chatMsgs.push({de:"ia", html:"Para conversar livremente, ative a IA em ⚙️ Configurar. Enquanto isso, use os atalhos de análise rápida."}); atualizarChat(); return; }
+  chatEstado="computing"; atualizarChat();
+  try{
+    const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pergunta:q, dados:Analise.resumoParaIA()})});
+    const d=await r.json();
+    const txt=d.resposta||d.texto||"";
+    chatMsgs.push({de:"ia", html:mdParaHtml(txt)||"Não consegui responder agora."});
+  }catch(e){ chatMsgs.push({de:"ia", html:"Não consegui consultar a IA agora. Tente novamente em instantes."}); }
+  chatEstado="idle"; atualizarChat();
+};
+G.chatRapida=(q)=>{
+  // reaproveita o motor determinístico Analise para respostas rápidas dentro do chat
+  const rotulos={cat:"Gastos por categoria",alim3:"Alimentação nos próximos 3 meses",parc:"Quando as parcelas aliviam",antec:"Antecipar parcelas"};
+  chatMsgs.push({de:"user", html:rotulos[q]||q});
+  let html="";
+  if(q==="cat"){ const c=Analise.porCategoria(); html=`<b>Seus gastos por categoria (mês):</b>${c.slice(0,6).map(x=>`<div style="display:flex;justify-content:space-between;margin-top:5px"><span>${x.cat}</span><span style="font-weight:700;color:var(--emerald)">${fmt(x.total)}</span></div>`).join("")}`; }
+  else if(q==="alim3"){ const r=[...Analise.principaisProximos(3,"Restaurante"),...Analise.principaisProximos(3,"Mercado")]; const tot=r.reduce((s,x)=>s+x.total,0); html=`<b>Alimentação nos próximos 3 meses:</b><div style="margin-top:4px">Total estimado: <b style="color:var(--emerald)">${fmt(tot)}</b></div>`; }
+  else if(q==="parc"){ const ev=Analise.evolucaoParcelas(); html=`<b>Parcelas:</b> hoje <b style="color:var(--gpink)">${fmt(ev[0].parcela)}/mês</b> → em ${ev.length} meses <b style="color:var(--emerald)">${fmt(ev[ev.length-1].parcela)}/mês</b>. Cada parcelamento que termina libera espaço.`; }
+  else if(q==="antec"){ html=`Me diga qual parcelamento quer antecipar (nome e valor) que eu simulo o desembolso e o alívio no orçamento.`; }
+  chatMsgs.push({de:"ia", html});
+  atualizarChat();
+};
+G.chatOuvir=()=>{
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const inp=document.getElementById("chatInput");
+  if(!SR){ if(inp) inp.placeholder="voz indisponível — digite"; return; }
+  if(chatEstado==="listening"){ try{recAg&&recAg.stop();}catch{} return; }
+  try{
+    recAg=new SR(); recAg.lang="pt-BR"; recAg.continuous=false; recAg.interimResults=true; recAg.maxAlternatives=1;
+    let captou=false;
+    recAg.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; const el=document.getElementById("chatInput"); if(el){ el.value=t; captou=!!t.trim(); } };
+    recAg.onend=()=>{ setChatEstado("idle"); if(captou){ const el=document.getElementById("chatInput"); if(el&&el.value.trim()) G.chatEnviar(); } };
+    recAg.onerror=ev=>{ setChatEstado("idle"); const el=document.getElementById("chatInput"); if(el&&ev){ if(ev.error==="not-allowed")el.placeholder="permita o microfone no Safari"; else if(ev.error==="no-speech")el.placeholder="não ouvi — toque e fale de novo"; } };
+    recAg.start(); setChatEstado("listening");
+  }catch(e){ setChatEstado("idle"); }
+};
 function bolha(html){ return `<div style="margin-top:12px;background:#fff;color:var(--ink);border-radius:16px;padding:14px 15px;font-size:13.5px;line-height:1.55;box-shadow:0 4px 16px rgba(0,0,0,.12)">${html}</div>`; }
 
 // Converte a resposta da IA (Markdown) em HTML estilizado com a cara do app
@@ -1116,20 +1256,95 @@ G.ouvirPergunta=()=>{
     let captou=false;
     recAg.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; if(inp){ inp.value=t; captou=!!t.trim(); } };
     recAg.onend=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; }
+      setOrbe(estadoOrbePadrao());
       if(captou && inp && inp.value.trim()) G.perguntarLivre();
     };
-    recAg.onerror=ev=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; }
+    recAg.onerror=ev=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; } setOrbe(estadoOrbePadrao());
       if(ev&&ev.error==="not-allowed" && inp){ inp.placeholder="permita o microfone nos ajustes do Safari"; }
       else if(ev&&ev.error==="no-speech" && inp){ inp.placeholder="não ouvi nada — toque e fale de novo"; }
     };
-    recAg.start(); ouvindoAg=true;
+    recAg.start(); ouvindoAg=true; setOrbe("listening");
     if(mic){ mic.textContent="⏹"; mic.style.background="var(--gpink)"; }
   }catch(e){ ouvindoAg=false; if(inp){ inp.placeholder="não consegui ativar o microfone — digite"; } }
+};
+function estadoOrbePadrao(){
+  try{ const e=calcularEscore(projecao(),state.renda,state.metaPct); return e.gapMeses>0?"alert":"idle"; }catch{ return "idle"; }
+}
+
+// ===== Stories de Projeção: narra a trajetória futura com o orbe mudando de estado =====
+function gerarStorySteps(){
+  const p=projecao();
+  const esc=calcularEscore(p,state.renda,state.metaPct);
+  const pred=calcularEscorePreditivo(state.renda,state.metaPct);
+  const steps=[];
+  // 1. estado atual (IDLE)
+  steps.push({aiState:"idle", titulo:"Hoje", texto:`Seu Escore de Comportamento está em <b>${esc.score} pontos</b> (${esc.faixa.nome}).`});
+  // 2. projeção 6 meses (COMPUTING)
+  if(!pred.indisponivel){
+    const delta=pred.score-esc.score;
+    steps.push({aiState:"computing", titulo:"Avançando no tempo…", texto:`Daqui a 6 meses (${pred.mesAlvo}), sua trajetória chega a <b>${pred.score} pontos</b>${delta>0?` — uma melhora de <b>+${delta}</b>`:delta<0?` — uma queda de <b>${delta}</b>`:""}.`});
+  }
+  // 3. meta de poupança acumulada
+  const guardadoAno=state.renda*state.metaPct*Math.min(state.horizonte,12);
+  steps.push({aiState:"computing", titulo:"Sua meta", texto:`Mantendo o ritmo, em ${Math.min(state.horizonte,12)} meses você terá guardado cerca de <b>${fmt(guardadoAno)}</b>.`});
+  // 4. alerta de pico de parcelas ou GAP (ALERT) — ou fechamento positivo (IDLE)
+  const picoMes=p.reduce((a,x)=>x.parcela>a.parcela?x:a,p[0]);
+  if(esc.gapMeses>0){
+    steps.push({aiState:"alert", titulo:"Atenção", texto:`Detectei <b>${esc.gapMeses} ${esc.gapMeses===1?'mês':'meses'}</b> com déficit no horizonte. Vale ajustar os gastos antes que aconteça.`, acao:"proj"});
+  } else if(picoMes && picoMes.parcela>state.renda*0.25){
+    steps.push({aiState:"alert", titulo:"Fique de olho", texto:`Em <b>${picoMes.mes}/${String(picoMes.ano).slice(2)}</b> há um pico de parcelas (${fmt(picoMes.parcela)}). Nada crítico, mas acompanhe.`, acao:"proj"});
+  } else {
+    steps.push({aiState:"idle", titulo:"Tudo no rumo", texto:`Nenhum mês com déficit à frente. Seu orçamento está saudável — continue assim! 💪`});
+  }
+  return steps;
+}
+G.abrirStory=()=>{
+  storyAtivo=true; storyStep=0;
+  document.body.insertAdjacentHTML("beforeend", renderStoryOverlay());
+  avancarStoryAuto();
+};
+function renderStoryOverlay(){
+  const steps=gerarStorySteps(); const st=steps[storyStep]||steps[0];
+  const barras=steps.map((_,i)=>`<div style="flex:1;height:3px;border-radius:2px;background:${i<storyStep?'#fff':i===storyStep?'rgba(255,255,255,.9)':'rgba(255,255,255,.25)'};overflow:hidden">${i===storyStep?'<div class="storyfill" style="height:100%;background:#fff;width:0"></div>':''}</div>`).join("");
+  const [c1,c2]=ORBE_CORES[st.aiState]||ORBE_CORES.idle;
+  return `<div id="storyOv" onclick="_g.storyNext(event)" style="position:fixed;inset:0;z-index:200;background:linear-gradient(165deg,${c1},#06121F);display:flex;flex-direction:column;padding:14px;animation:slideIn .3s">
+    <div style="display:flex;gap:5px;margin-bottom:20px">${barras}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:auto">
+      <div style="display:flex;align-items:center;gap:9px">${orbeGuavAI(st.aiState,34)}<span style="color:#fff;font-weight:800;font-size:16px">GuavAI</span></div>
+      <button onclick="event.stopPropagation();_g.fecharStory()" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:18px">✕</button>
+    </div>
+    <div style="margin:auto 0;padding-bottom:40px">
+      <div style="display:flex;justify-content:center;margin-bottom:28px">${orbeGuavAI(st.aiState,120)}</div>
+      <div style="font-size:13px;font-weight:700;color:${c2};text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${st.titulo}</div>
+      <div style="font-size:22px;font-weight:700;color:#fff;line-height:1.4">${st.texto}</div>
+      ${st.acao?`<button onclick="event.stopPropagation();_g.fecharStory();_g.setTab('${st.acao}')" style="margin-top:20px;background:#FF6584;border:none;color:#fff;font-weight:700;padding:12px 20px;border-radius:12px;font-size:14px">ver na projeção →</button>`:""}
+    </div>
+    <div style="text-align:center;color:rgba(255,255,255,.4);font-size:11px">toque para avançar</div>
+  </div>`;
+}
+function avancarStoryAuto(){
+  clearTimeout(storyTimer);
+  const fill=document.querySelector("#storyOv .storyfill");
+  if(fill){ fill.style.transition="width 5s linear"; requestAnimationFrame(()=>{ fill.style.width="100%"; }); }
+  storyTimer=setTimeout(()=>{ G.storyNext(); }, 5000);
+}
+G.storyNext=(ev)=>{
+  if(ev) ev.stopPropagation();
+  const steps=gerarStorySteps();
+  if(storyStep>=steps.length-1){ G.fecharStory(); return; }
+  storyStep++;
+  const ov=document.getElementById("storyOv"); if(ov) ov.outerHTML=renderStoryOverlay();
+  avancarStoryAuto();
+};
+G.fecharStory=()=>{
+  storyAtivo=false; clearTimeout(storyTimer);
+  const ov=document.getElementById("storyOv"); if(ov) ov.remove();
 };
 G.perguntarLivre=async()=>{
   const inp=document.getElementById("agInput"); const pergunta=(inp&&inp.value||"").trim();
   if(!pergunta) return;
   if(!cfg.funcaoUrl){ respostaAgente=bolha("Para perguntas livres, ative a IA em ⚙️ Configurar."); document.getElementById("agResp").innerHTML=respostaAgente; return; }
+  setOrbe("computing");
   respostaAgente=bolha("<span style='color:var(--mute)'>analisando seus dados…</span>");
   document.getElementById("agResp").innerHTML=respostaAgente;
   try{
@@ -1140,6 +1355,7 @@ G.perguntarLivre=async()=>{
     respostaAgente=bolha(mdParaHtml(txt));
   }catch(e){ respostaAgente=bolha("Não consegui consultar a IA agora. Tente as perguntas rápidas acima."); }
   document.getElementById("agResp").innerHTML=respostaAgente;
+  setOrbe(estadoOrbePadrao());
 };
 
 // ---------- Projeção ----------
