@@ -30,6 +30,10 @@
   button:active{opacity:.7}
   main{max-width:600px;margin:0 auto;padding:0 14px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px;animation:pop .25s ease both;box-shadow:0 6px 20px rgba(10,37,64,.06)}
+  /* PATCH: depois do primeiro paint, para de re-tocar a animação de entrada dos cards
+     a cada render (isso causava o "piscar" em qualquer interação: marcar pago, editar,
+     digitar renda etc., pois innerHTML recria os nós e a animação replaya). */
+  body.boot-done .card{animation:none}
   @keyframes pop{0%{transform:translateY(8px);opacity:0}100%{transform:none;opacity:1}}
   @keyframes slideIn{0%{transform:translateX(12px);opacity:0}100%{transform:none;opacity:1}}
   /* Orbe GuavAI — máquina de estados */
@@ -77,6 +81,17 @@
   .saveTag.show{opacity:.95}
   .banner{background:var(--guavaSoft);border:1px solid #F6D2CD;color:#B23B2E;font-size:13px;padding:10px 12px;border-radius:10px;margin:12px 0;line-height:1.5}
   label.fld{display:block;font-size:12px;color:var(--mute);font-weight:600;margin-top:10px}
+  /* ===== Gravação de voz estilo WhatsApp (chat GuavAI) ===== */
+  @keyframes recDot{0%,100%{opacity:1}50%{opacity:.25}}
+  @keyframes wave{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+  .recBar{display:flex;align-items:center;gap:10px;flex:1;min-width:0;background:rgba(255,255,255,.95);border-radius:22px;padding:9px 14px;color:var(--ink)}
+  .recDot{width:11px;height:11px;border-radius:50%;background:var(--gpink);flex:none;animation:recDot 1s ease-in-out infinite}
+  .recWave{display:flex;align-items:center;gap:2.5px;height:20px;flex:1;min-width:0;overflow:hidden}
+  .recWave span{display:block;width:2.5px;border-radius:2px;background:var(--cyan);height:100%;transform-origin:center;animation:wave .9s ease-in-out infinite}
+  .recCancelHint{font-size:12px;color:var(--mute);white-space:nowrap;display:flex;align-items:center;gap:4px}
+  .micBtn{transition:transform .15s ease, background .15s ease}
+  .micBtn.recording{transform:scale(1.25);background:var(--gpink)!important;box-shadow:0 0 0 6px rgba(255,101,132,.22)}
+  .micBtn.cancel{background:#94A3B8!important;box-shadow:0 0 0 6px rgba(148,163,184,.25)}
 </style>
 </head>
 <body>
@@ -283,7 +298,13 @@ async function iniciarFirebase(){
       if(snap.exists()){ state={...state,...snap.data()}; salvarLocal(); render(); }
       else { await gravarFirebase(); }
       if(fb.unsub) fb.unsub();
-      fb.unsub=onSnapshot(fb.ref,d=>{ if(d.exists()){ state={...state,...d.data()}; salvarLocal(); render(); }});
+      // PATCH: ignora o "eco" de escritas locais pendentes (metadata.hasPendingWrites).
+      // Antes, cada salvar() gerava um onSnapshot extra que refazia o render() inteiro
+      // logo depois do usuário interagir — dobrando o "piscar" na tela.
+      fb.unsub=onSnapshot(fb.ref,{includeMetadataChanges:true},d=>{
+        if(d.metadata && d.metadata.hasPendingWrites) return;
+        if(d.exists()){ state={...state,...d.data()}; salvarLocal(); render(); }
+      });
     });
   }catch(e){ banner("Não consegui iniciar o Firebase. Verifique a configuração em ⚙️."); }
 }
@@ -670,12 +691,20 @@ G.setMeta=x=>{ state.metaPct=x; salvar(); render(); };
 G.setFiltro=g=>{ filtroDesp=g; render(); };
 G.setModo=k=>{ modoAdd=k; ouvindo=false; render(); };
 
+// PATCH: só re-anima a troca de tela quando o usuário realmente muda de aba.
+// Antes, TODO render() (marcar como pago, editar campo, digitar renda, incluir
+// despesa, resposta do agente, sync do Firebase...) forçava reflow e re-tocava a
+// animação de entrada em todos os cards — esse era o "piscar" da tela inteira.
+let lastTabRendered=null;
 function render(){
   document.getElementById("rendaVal").innerHTML=fmt(state.renda)+' <span style="color:var(--gpink)">✏️</span>';
   const sync=fb.ref?" · sincronizado":"";
   document.getElementById("hsub").textContent=`${state.horizonte} meses${sync}`;
   renderNav();
-  app.classList.remove("swap"); void app.offsetWidth; app.classList.add("swap");
+  const trocouTab = tab!==lastTabRendered;
+  lastTabRendered = tab;
+  if(trocouTab){ app.classList.remove("swap"); void app.offsetWidth; app.classList.add("swap"); }
+  else { app.classList.remove("swap"); }
   if(tab==="inicio") app.innerHTML=viewInicio();
   else if(tab==="proj") app.innerHTML=viewProj();
   else if(tab==="detalheMes") app.innerHTML=viewDetalheMes();
@@ -685,6 +714,11 @@ function render(){
   else if(tab==="add"){ app.innerHTML=viewAdd(); ligarAdd(); }
   else if(tab==="config"){ app.innerHTML=viewConfig(); ligarConfig(); }
   else if(tab==="saiba") app.innerHTML=viewSaiba();
+  // depois do primeiro paint, desliga a re-animação de "pop" dos cards (ver CSS
+  // body.boot-done .card{animation:none}) — ela só deve rodar na entrada inicial.
+  if(!document.body.classList.contains("boot-done")){
+    requestAnimationFrame(()=>document.body.classList.add("boot-done"));
+  }
 }
 function renderNav(){
   const items=[["inicio","⌂","Início"],["proj","◔","Projeção"],["despesas","▤","Despesas"],["metas","◎","Metas"],["add","+","Adicionar"],["saiba","?","Saiba+"]];
@@ -966,17 +1000,22 @@ const ORBE_CORES={
   computing:["#004B49","#00C49F"],
   alert:["#FF6584","#7C2D49"],
 };
-function orbeGuavAI(estado,tam){
+// PATCH: orbeGuavAI agora aceita um id opcional. Antes o id "orbeGuav" era fixo
+// e repetido em VÁRIOS elementos ao mesmo tempo (card da home + chat + stories),
+// o que é HTML inválido e fazia document.getElementById() (usado por setOrbe)
+// atualizar sempre o primeiro elemento da página — não necessariamente o que
+// estava visível. Cada contexto agora usa seu próprio id.
+function orbeGuavAI(estado,tam,id){
   const s=tam||30, e=estado||"idle", [c1,c2]=ORBE_CORES[e]||ORBE_CORES.idle;
   const glow = e==="listening"||e==="computing" ? `box-shadow:0 0 ${s*0.5}px ${c2}aa,0 0 ${s*0.9}px ${c2}55;` : e==="alert" ? `box-shadow:0 0 ${s*0.5}px #FF6584aa;` : "";
-  return `<div class="orbe ${e}" id="orbeGuav" style="width:${s}px;height:${s}px;flex:none;background:radial-gradient(circle at 35% 30%, ${c2}, ${c1} 75%);${glow}">
+  return `<div class="orbe ${e}" id="${id||'orbeGuav'}" style="width:${s}px;height:${s}px;flex:none;background:radial-gradient(circle at 35% 30%, ${c2}, ${c1} 75%);${glow}">
     <div class="ripple"></div>
     <div style="position:absolute;top:26%;left:28%;width:${s*0.28}px;height:${s*0.28}px;border-radius:50%;background:rgba(255,255,255,.55);filter:blur(1px)"></div>
   </div>`;
 }
 // define o estado do orbe já renderizado (sem re-render da tela toda)
-function setOrbe(estado){
-  const o=document.getElementById("orbeGuav"); if(!o) return;
+function setOrbe(estado,id){
+  const o=document.getElementById(id||"orbeGuav"); if(!o) return;
   o.className="orbe "+estado;
   const [c1,c2]=ORBE_CORES[estado]||ORBE_CORES.idle;
   o.style.background=`radial-gradient(circle at 35% 30%, ${c2}, ${c1} 75%)`;
@@ -1061,6 +1100,19 @@ function cardAgente(){
 }
 
 // ===== Experiência conversacional em tela cheia (estilo Siri) =====
+// PATCH (bug do microfone / "piscar" do chat): a implementação original chamava
+// atualizarChat() -> ov.outerHTML = renderChat() a cada mudança de estado
+// (idle/listening/computing) e a cada mensagem nova. Isso DESTRUÍA E RECRIAVA
+// toda a árvore DOM do modal — inclusive o próprio botão de microfone que
+// acabara de ser tocado — no meio do mesmo gesto que iniciava o
+// SpeechRecognition. No Safari/iOS isso é agressivo o suficiente para abortar
+// a captura de áudio silenciosamente, além de tirar o foco do campo de texto e
+// re-tocar a animação de entrada do modal (o "piscar" percebido).
+// Agora: a abertura do chat continua usando renderChat() (uma vez só, é
+// intencional que o modal "deslize" ao abrir). Depois disso, apenas:
+//  - o orbe muda de cor/estado via setOrbe() (mutação de estilo, sem destruir DOM)
+//  - o rótulo (“ouvindo…”/“pensando…”) muda via textContent
+//  - novas mensagens são inseridas com insertAdjacentHTML (append), não outerHTML
 G.abrirChat=()=>{
   if(!cfg.funcaoUrl){ /* sem IA: ainda permite perguntas rápidas */ }
   chatAberto=true; chatEstado="idle";
@@ -1070,6 +1122,7 @@ G.abrirChat=()=>{
   }
   document.body.insertAdjacentHTML("beforeend", renderChat());
   document.body.style.overflow="hidden";
+  ligarChatMic();
 };
 G.fecharChat=()=>{
   chatAberto=false; document.body.style.overflow="";
@@ -1085,10 +1138,7 @@ function renderChat(){
   const temIA=!!cfg.funcaoUrl;
   const orbeGrande = chatEstado!=="idle" || chatMsgs.length<=1;
   const tamOrbe = orbeGrande ? 96 : 52;
-  const baloes = chatMsgs.map(m=> m.de==="user"
-    ? `<div style="align-self:flex-end;max-width:82%;background:var(--gpink);color:#fff;padding:11px 14px;border-radius:18px 18px 4px 18px;font-size:14px;line-height:1.45;box-shadow:0 2px 10px rgba(255,101,132,.3)">${m.html}</div>`
-    : `<div style="align-self:flex-start;max-width:88%;background:#fff;color:var(--ink);padding:12px 15px;border-radius:18px 18px 18px 4px;font-size:13.5px;line-height:1.5;box-shadow:0 3px 14px rgba(0,0,0,.12)">${m.html}</div>`
-  ).join("");
+  const baloes = chatMsgs.map(m=>baloaHTML(m)).join("");
   const rotuloEstado = chatEstado==="listening"?"ouvindo…":chatEstado==="computing"?"pensando…":"";
   return `<div id="chatOv" style="position:fixed;inset:0;z-index:210;background:linear-gradient(180deg,${c1} 0%,#0A2540 40%,#081826 100%);display:flex;flex-direction:column;animation:slideIn .3s">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:calc(12px + env(safe-area-inset-top)) 16px 8px">
@@ -1096,68 +1146,189 @@ function renderChat(){
       <button onclick="_g.fecharChat()" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px">✕</button>
     </div>
     <div id="chatOrbe" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:${orbeGrande?'20px':'8px'} 0;transition:padding .4s">
-      ${orbeGuavAI(chatEstado,tamOrbe)}
-      ${rotuloEstado?`<div style="color:${c2};font-size:12px;font-weight:600;margin-top:10px;letter-spacing:.3px">${rotuloEstado}</div>`:""}
+      ${orbeGuavAI(chatEstado,tamOrbe,'orbeGuavChat')}
+      <div id="chatRotulo" style="color:${c2};font-size:12px;font-weight:600;margin-top:10px;letter-spacing:.3px">${rotuloEstado}</div>
     </div>
     <div id="chatMsgs" style="flex:1;overflow-y:auto;padding:8px 16px 12px;display:flex;flex-direction:column;gap:10px">
       ${baloes}
     </div>
-    ${chatMsgs.length<=1?`<div style="padding:0 12px 8px;display:flex;gap:7px;overflow-x:auto">${sugestoes.map(([t,q])=>`<button onclick="_g.chatRapida('${q}')" style="white-space:nowrap;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 13px;border-radius:20px">${t}</button>`).join("")}</div>`:""}
-    <div style="padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:rgba(8,24,38,.6);backdrop-filter:blur(10px)">
-      <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'pergunte ou toque no microfone…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:22px;padding:13px 16px;font-size:14px;background:rgba(255,255,255,.95);color:var(--ink)">
-      <button id="chatMic" onclick="_g.chatOuvir()" ${temIA?'':'disabled'} style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:19px;flex:none;${temIA?'':'opacity:.4'}">🎙️</button>
-      <button onclick="_g.chatEnviar()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">▸</button>
+    ${chatMsgs.length<=1?`<div id="chatSugestoes" style="padding:0 12px 8px;display:flex;gap:7px;overflow-x:auto">${sugestoes.map(([t,q])=>`<button onclick="_g.chatRapida('${q}')" style="white-space:nowrap;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 13px;border-radius:20px">${t}</button>`).join("")}</div>`:""}
+    <div id="chatBar" style="padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:rgba(8,24,38,.6);backdrop-filter:blur(10px)">
+      <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'digite ou segure o microfone…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:22px;padding:13px 16px;font-size:14px;background:rgba(255,255,255,.95);color:var(--ink)">
+      <button id="chatMic" class="micBtn" ${temIA?'':'disabled'} aria-label="Segure para gravar" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:19px;flex:none;touch-action:none;${temIA?'':'opacity:.4'}">🎙️</button>
+      <button id="chatSend" onclick="_g.chatEnviar()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">▸</button>
     </div>
   </div>`;
 }
+function baloaHTML(m){
+  return m.de==="user"
+    ? `<div style="align-self:flex-end;max-width:82%;background:var(--gpink);color:#fff;padding:11px 14px;border-radius:18px 18px 4px 18px;font-size:14px;line-height:1.45;box-shadow:0 2px 10px rgba(255,101,132,.3)">${m.html}</div>`
+    : `<div style="align-self:flex-start;max-width:88%;background:#fff;color:var(--ink);padding:12px 15px;border-radius:18px 18px 18px 4px;font-size:13.5px;line-height:1.5;box-shadow:0 3px 14px rgba(0,0,0,.12)">${m.html}</div>`;
+}
+// PATCH: adiciona só a bolha nova (sem recriar o modal inteiro) e remove os
+// chips de sugestão após a primeira mensagem, sem outerHTML.
+function appendChatBubble(m){
+  const box=document.getElementById("chatMsgs");
+  if(!box) return;
+  box.insertAdjacentHTML("beforeend", baloaHTML(m));
+  box.scrollTop=box.scrollHeight;
+  const sug=document.getElementById("chatSugestoes"); if(sug) sug.remove();
+}
+// PATCH: atualização leve de estado — não recria DOM. É isso que resolve tanto
+// o "piscar" quanto o microfone não capturar (o botão/inputs nunca são destruídos).
 function atualizarChat(){
   const ov=document.getElementById("chatOv"); if(!ov) return;
   ov.outerHTML=renderChat();
   const box=document.getElementById("chatMsgs"); if(box) box.scrollTop=box.scrollHeight;
 }
-function setChatEstado(e){ chatEstado=e; const o=document.getElementById("chatOv"); if(o){ atualizarChat(); } }
+function setChatEstado(e){
+  chatEstado=e;
+  if(!document.getElementById("chatOv")) return;
+  setOrbe(e,"orbeGuavChat");
+  const rot=document.getElementById("chatRotulo");
+  if(rot){
+    const [,c2]=ORBE_CORES[e]||ORBE_CORES.idle;
+    rot.textContent = e==="listening"?"ouvindo…":e==="computing"?"pensando…":"";
+    rot.style.color=c2;
+  }
+}
 G.chatEnviar=async()=>{
   const inp=document.getElementById("chatInput"); const q=(inp&&inp.value||"").trim();
   if(!q) return;
-  chatMsgs.push({de:"user", html:q.replace(/</g,"&lt;")});
+  const userMsg={de:"user", html:q.replace(/</g,"&lt;")};
+  chatMsgs.push(userMsg); appendChatBubble(userMsg);
   if(inp) inp.value="";
-  if(!cfg.funcaoUrl){ chatMsgs.push({de:"ia", html:"Para conversar livremente, ative a IA em ⚙️ Configurar. Enquanto isso, use os atalhos de análise rápida."}); atualizarChat(); return; }
-  chatEstado="computing"; atualizarChat();
+  if(!cfg.funcaoUrl){ const m={de:"ia", html:"Para conversar livremente, ative a IA em ⚙️ Configurar. Enquanto isso, use os atalhos de análise rápida."}; chatMsgs.push(m); appendChatBubble(m); return; }
+  setChatEstado("computing");
   try{
     const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({pergunta:q, dados:Analise.resumoParaIA()})});
     const d=await r.json();
     const txt=d.resposta||d.texto||"";
-    chatMsgs.push({de:"ia", html:mdParaHtml(txt)||"Não consegui responder agora."});
-  }catch(e){ chatMsgs.push({de:"ia", html:"Não consegui consultar a IA agora. Tente novamente em instantes."}); }
-  chatEstado="idle"; atualizarChat();
+    const m={de:"ia", html:mdParaHtml(txt)||"Não consegui responder agora."}; chatMsgs.push(m); appendChatBubble(m);
+  }catch(e){ const m={de:"ia", html:"Não consegui consultar a IA agora. Tente novamente em instantes."}; chatMsgs.push(m); appendChatBubble(m); }
+  setChatEstado("idle");
 };
 G.chatRapida=(q)=>{
   // reaproveita o motor determinístico Analise para respostas rápidas dentro do chat
   const rotulos={cat:"Gastos por categoria",alim3:"Alimentação nos próximos 3 meses",parc:"Quando as parcelas aliviam",antec:"Antecipar parcelas"};
-  chatMsgs.push({de:"user", html:rotulos[q]||q});
+  const userMsg={de:"user", html:rotulos[q]||q}; chatMsgs.push(userMsg); appendChatBubble(userMsg);
   let html="";
   if(q==="cat"){ const c=Analise.porCategoria(); html=`<b>Seus gastos por categoria (mês):</b>${c.slice(0,6).map(x=>`<div style="display:flex;justify-content:space-between;margin-top:5px"><span>${x.cat}</span><span style="font-weight:700;color:var(--emerald)">${fmt(x.total)}</span></div>`).join("")}`; }
   else if(q==="alim3"){ const r=[...Analise.principaisProximos(3,"Restaurante"),...Analise.principaisProximos(3,"Mercado")]; const tot=r.reduce((s,x)=>s+x.total,0); html=`<b>Alimentação nos próximos 3 meses:</b><div style="margin-top:4px">Total estimado: <b style="color:var(--emerald)">${fmt(tot)}</b></div>`; }
   else if(q==="parc"){ const ev=Analise.evolucaoParcelas(); html=`<b>Parcelas:</b> hoje <b style="color:var(--gpink)">${fmt(ev[0].parcela)}/mês</b> → em ${ev.length} meses <b style="color:var(--emerald)">${fmt(ev[ev.length-1].parcela)}/mês</b>. Cada parcelamento que termina libera espaço.`; }
   else if(q==="antec"){ html=`Me diga qual parcelamento quer antecipar (nome e valor) que eu simulo o desembolso e o alívio no orçamento.`; }
-  chatMsgs.push({de:"ia", html});
-  atualizarChat();
+  const m={de:"ia", html}; chatMsgs.push(m); appendChatBubble(m);
 };
-G.chatOuvir=()=>{
+// ===== Gravação de voz estilo WhatsApp =====
+// Segurar o microfone grava; soltar envia; arrastar para a esquerda (ou tocar
+// enquanto grava) cancela. A barra de digitação vira uma "onda" animada com
+// cronômetro, dando o mesmo feedback tátil/visual do WhatsApp.
+// Reaproveita Web Speech (transcrição on-device) — não sobe áudio pro servidor,
+// então o "envio" é o texto transcrito, mais rápido e privado.
+let recState={rec:null,ativo:false,cancelado:false,captou:false,texto:"",t0:0,timer:null,startX:0};
+
+function ligarChatMic(){
+  const mic=document.getElementById("chatMic");
+  if(!mic) return;
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const inp=document.getElementById("chatInput");
-  if(!SR){ if(inp) inp.placeholder="voz indisponível — digite"; return; }
-  if(chatEstado==="listening"){ try{recAg&&recAg.stop();}catch{} return; }
+  if(!SR){
+    // sem reconhecimento de voz: mic vira um aviso ao tocar
+    mic.addEventListener("click",()=>{ const inp=document.getElementById("chatInput"); if(inp) inp.placeholder="voz indisponível neste aparelho — digite"; });
+    return;
+  }
+  // pointer events cobrem toque e mouse de forma unificada
+  mic.addEventListener("pointerdown",e=>{ e.preventDefault(); iniciarGravacao(e); });
+  mic.addEventListener("pointermove",e=>{ if(recState.ativo) monitorarArrasto(e); });
+  mic.addEventListener("pointerup",e=>{ if(recState.ativo) finalizarGravacao(); });
+  mic.addEventListener("pointercancel",()=>{ if(recState.ativo) cancelarGravacao(); });
+  mic.addEventListener("pointerleave",e=>{ if(recState.ativo) monitorarArrasto(e); });
+}
+function ondaHTML(){
+  // 22 barrinhas com alturas/atrasos variados — aparência de waveform viva
+  let bars="";
+  for(let i=0;i<22;i++){ const h=30+Math.round(Math.abs(Math.sin(i*1.3))*70); bars+=`<span style="animation-delay:${(i%7)*0.08}s;height:${h}%"></span>`; }
+  return bars;
+}
+function iniciarGravacao(e){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const mic=document.getElementById("chatMic"); if(!mic) return;
+  try{ mic.setPointerCapture&&mic.setPointerCapture(e.pointerId); }catch{}
+  recState.startX = e.clientX||0;
+  recState.cancelado=false; recState.captou=false; recState.texto="";
   try{
-    recAg=new SR(); recAg.lang="pt-BR"; recAg.continuous=false; recAg.interimResults=true; recAg.maxAlternatives=1;
-    let captou=false;
-    recAg.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; const el=document.getElementById("chatInput"); if(el){ el.value=t; captou=!!t.trim(); } };
-    recAg.onend=()=>{ setChatEstado("idle"); if(captou){ const el=document.getElementById("chatInput"); if(el&&el.value.trim()) G.chatEnviar(); } };
-    recAg.onerror=ev=>{ setChatEstado("idle"); const el=document.getElementById("chatInput"); if(el&&ev){ if(ev.error==="not-allowed")el.placeholder="permita o microfone no Safari"; else if(ev.error==="no-speech")el.placeholder="não ouvi — toque e fale de novo"; } };
-    recAg.start(); setChatEstado("listening");
-  }catch(e){ setChatEstado("idle"); }
-};
+    const r=new SR(); recState.rec=r; recAg=r;
+    r.lang="pt-BR"; r.continuous=true; r.interimResults=true; r.maxAlternatives=1;
+    r.onresult=ev=>{ let t=""; for(let i=0;i<ev.results.length;i++) t+=ev.results[i][0].transcript; recState.texto=t; recState.captou=!!t.trim(); };
+    r.onerror=ev=>{
+      const inp=document.getElementById("chatInput");
+      if(inp && ev){ if(ev.error==="not-allowed") inp.placeholder="permita o microfone no Safari"; else if(ev.error==="no-speech") inp.placeholder="não ouvi — segure e fale de novo"; }
+      encerrarUI();
+    };
+    r.onend=()=>{
+      const enviar = recState.captou && !recState.cancelado;
+      const txt=recState.texto.trim();
+      encerrarUI();
+      if(enviar && txt){ const inp=document.getElementById("chatInput"); if(inp) inp.value=txt; G.chatEnviar(); }
+    };
+    r.start();
+    recState.ativo=true; recState.t0=Date.now();
+    mostrarUIgravacao();
+    setChatEstado("listening");
+  }catch(err){ recState.ativo=false; }
+}
+function mostrarUIgravacao(){
+  const bar=document.getElementById("chatBar"); const mic=document.getElementById("chatMic");
+  if(!bar) return;
+  if(mic) mic.classList.add("recording");
+  // troca input+send por uma barra de gravação; guarda o HTML original p/ restaurar
+  if(!bar._orig) bar._orig=bar.innerHTML;
+  const rec=document.createElement("div"); rec.className="recBar"; rec.id="recBarLive";
+  rec.innerHTML=`<span class="recDot"></span><span id="recTime" style="font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;width:40px;flex:none">0:00</span>
+    <div class="recWave">${ondaHTML()}</div>
+    <span class="recCancelHint">‹ arraste p/ cancelar</span>`;
+  bar.insertBefore(rec, bar.firstChild);
+  // esconde input e botão de enviar durante a gravação (mic continua p/ soltar)
+  const inp=document.getElementById("chatInput"), send=document.getElementById("chatSend");
+  if(inp) inp.style.display="none"; if(send) send.style.display="none";
+  clearInterval(recState.timer);
+  recState.timer=setInterval(()=>{
+    const s=Math.floor((Date.now()-recState.t0)/1000);
+    const el=document.getElementById("recTime"); if(el) el.textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+  },250);
+}
+function monitorarArrasto(e){
+  const dx=(e.clientX||0)-recState.startX;
+  const mic=document.getElementById("chatMic");
+  const hint=document.querySelector("#recBarLive .recCancelHint");
+  const vaiCancelar = dx < -70; // arrastou bem à esquerda
+  if(mic){ mic.classList.toggle("cancel",vaiCancelar); }
+  if(hint){ hint.textContent = vaiCancelar ? "solte p/ cancelar" : "‹ arraste p/ cancelar"; hint.style.color = vaiCancelar? "var(--gpink)":"var(--mute)"; }
+  recState._vaiCancelar=vaiCancelar;
+}
+function finalizarGravacao(){
+  // gravação muito curta = provável toque acidental → cancela
+  const dur=Date.now()-recState.t0;
+  if(recState._vaiCancelar || dur<400){ cancelarGravacao(); return; }
+  recState.cancelado=false;
+  try{ recState.rec&&recState.rec.stop(); }catch{ encerrarUI(); }
+}
+function cancelarGravacao(){
+  recState.cancelado=true;
+  try{ recState.rec&&recState.rec.stop(); }catch{ encerrarUI(); }
+}
+function encerrarUI(){
+  recState.ativo=false; recState._vaiCancelar=false;
+  clearInterval(recState.timer);
+  const bar=document.getElementById("chatBar"); const mic=document.getElementById("chatMic");
+  const live=document.getElementById("recBarLive"); if(live) live.remove();
+  const inp=document.getElementById("chatInput"), send=document.getElementById("chatSend");
+  if(inp) inp.style.display=""; if(send) send.style.display="";
+  if(mic){ mic.classList.remove("recording","cancel"); }
+  setChatEstado("idle");
+}
+// compat: chamadas antigas
+G.chatOuvir=()=>{};
 function bolha(html){ return `<div style="margin-top:12px;background:#fff;color:var(--ink);border-radius:16px;padding:14px 15px;font-size:13.5px;line-height:1.55;box-shadow:0 4px 16px rgba(0,0,0,.12)">${html}</div>`; }
 
 // Converte a resposta da IA (Markdown) em HTML estilizado com a cara do app
@@ -1310,11 +1481,11 @@ function renderStoryOverlay(){
   return `<div id="storyOv" onclick="_g.storyNext(event)" style="position:fixed;inset:0;z-index:200;background:linear-gradient(165deg,${c1},#06121F);display:flex;flex-direction:column;padding:14px;animation:slideIn .3s">
     <div style="display:flex;gap:5px;margin-bottom:20px">${barras}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:auto">
-      <div style="display:flex;align-items:center;gap:9px">${orbeGuavAI(st.aiState,34)}<span style="color:#fff;font-weight:800;font-size:16px">GuavAI</span></div>
+      <div style="display:flex;align-items:center;gap:9px">${orbeGuavAI(st.aiState,34,'orbeGuavStorySmall')}<span style="color:#fff;font-weight:800;font-size:16px">GuavAI</span></div>
       <button onclick="event.stopPropagation();_g.fecharStory()" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:18px">✕</button>
     </div>
     <div style="margin:auto 0;padding-bottom:40px">
-      <div style="display:flex;justify-content:center;margin-bottom:28px">${orbeGuavAI(st.aiState,120)}</div>
+      <div style="display:flex;justify-content:center;margin-bottom:28px">${orbeGuavAI(st.aiState,120,'orbeGuavStoryBig')}</div>
       <div style="font-size:13px;font-weight:700;color:${c2};text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">${st.titulo}</div>
       <div style="font-size:22px;font-weight:700;color:#fff;line-height:1.4">${st.texto}</div>
       ${st.acao?`<button onclick="event.stopPropagation();_g.fecharStory();_g.setTab('${st.acao}')" style="margin-top:20px;background:#FF6584;border:none;color:#fff;font-weight:700;padding:12px 20px;border-radius:12px;font-size:14px">ver na projeção →</button>`:""}
