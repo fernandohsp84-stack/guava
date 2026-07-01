@@ -187,7 +187,7 @@ const FUNCAO_URL_PADRAO = "https://southamerica-east1-guava-app-513a0.cloudfunct
 // ====================================================================
 
 // ---------- estado ----------
-let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[]};
+let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[],objetivos:[]};
 let cfg={firebase:{
   apiKey:"AIzaSyDOEAOM9wRi1dUWLTMkxtvjpluEjaY2bCU",
   authDomain:"guava-app-513a0.firebaseapp.com",
@@ -790,7 +790,6 @@ function viewInicio(){
   <div style="height:12px"></div>
   <div>
     <div id="bannerSlot">${bannerMsg?`<div class="banner">${bannerMsg}</div>`:""}</div>
-    ${cardAgente()}
     <div class="grid2">
       <div class="card" style="background:linear-gradient(160deg,#1C4257 0%,#122A3D 100%);border:none;color:#fff;padding:16px 14px;position:relative;overflow:hidden;border-radius:22px;box-shadow:0 10px 26px rgba(18,42,61,.35)">
         <div style="font-size:14px;font-weight:700;color:#fff">Disponível p/ gastar</div>
@@ -810,6 +809,7 @@ function viewInicio(){
         <div style="margin-top:8px"><span style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-.5px">${fmt(guardadoAlvo)}</span> <span style="font-size:11px;color:#EAF2FF">(${rend.toFixed(0)}% da Renda)</span></div>
       </div>
     </div>
+    ${cardGuavAICentral(esc.gapMeses>0)}
     <div class="card">
       <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">LIMITE DE GASTOS MENSAL</div>
       <div style="font-size:22px;font-weight:800;color:var(--navy);margin-top:4px">${fmt(m.total)}</div>
@@ -834,6 +834,17 @@ function viewInicio(){
     ${cardIncentivos()}
     ${semBackend?`<div style="font-size:12px;color:var(--cyan);text-align:center;padding:4px 10px 12px">💡 Texto e voz já funcionam. Para foto/PDF e sincronizar, toque em ⚙️ Configurar.</div>`:""}
   </div>`;
+}
+
+// GuavAI — apresentação central: nome ACIMA, mascote maior (proporcional aos
+// demais itens), o card inteiro é tocável e abre a tela conversacional.
+function cardGuavAICentral(alerta){
+  return `<button onclick="_g.abrirChat()" class="card" style="background:var(--grad-dash);border:none;color:#fff;width:100%;text-align:center;padding:18px 16px 20px;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;overflow:hidden">
+    <div style="position:absolute;inset:0;background:radial-gradient(320px 160px at 50% -10%, rgba(120,230,180,.20), transparent 60%);pointer-events:none"></div>
+    <div style="font-size:19px;font-weight:800;letter-spacing:.4px;position:relative">GuavAI</div>
+    <div style="margin:2px 0;position:relative">${orbeGuavAI(alerta?'alert':'idle',110,'orbeHome')}</div>
+    <div style="font-size:12.5px;color:#BEE3CC;position:relative">${alerta?'toque para ver onde ajustar':'toque para conversar com seu copiloto'}</div>
+  </button>`;
 }
 
 // Card "Visão de Futuro": estética "aurora" (ref. layout aprovado) — gradiente
@@ -1906,6 +1917,7 @@ function viewMetas(){
     <div class="card"><div style="font-size:13px;font-weight:700;margin-bottom:10px">Quanto guardar por mês?</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${botoes}</div>
       <div style="margin-top:12px;text-align:center;font-size:14px">meta: <b style="color:var(--green)">${fmt(guardadoAlvo)}</b>/mês</div></div>
+    ${cardObjetivos()}
     <div class="card">
       ${row("Renda mensal",state.renda,true,"var(--blue)")}${row("Ordinárias",-m.fixo)}${row("Estimadas (provável)",-m.estimado)}${row("Eventuais do mês",-m.eventual)}${row("Parcelas",-m.parcela,false,"var(--guava)")}
       <div style="border-top:1.5px solid var(--line);margin:8px 0"></div>
@@ -1916,6 +1928,119 @@ function viewMetas(){
     ${cardHistorico()}
   </div>`;
 }
+
+// ===== OBJETIVOS (Viagem, Carro, Casa...) com progresso e apreciação =====
+const OBJ_TEMAS={
+  viagem:{emoji:"✈️",label:"Viagem"}, carro:{emoji:"🚗",label:"Carro"},
+  casa:{emoji:"🏠",label:"Casa"}, estudo:{emoji:"🎓",label:"Estudo"},
+  reserva:{emoji:"🛟",label:"Reserva"}, outro:{emoji:"⭐",label:"Outro"},
+};
+let objForm=false, objTipoTmp="viagem", objEdit=null;
+// capacidade de poupança mensal (referência p/ estimativas)
+function poupancaMensal(){ return Math.max(state.renda*state.metaPct,1); }
+// apreciação (determinística) de quão perto/longe está a meta — funciona sem IA
+function apreciarObjetivo(o){
+  const alvo=+o.alvo||0, guardado=+o.guardado||0, falta=Math.max(alvo-guardado,0);
+  const pct=alvo>0?Math.min(guardado/alvo,1):0;
+  if(pct>=1) return {pct, txt:`🎉 Meta alcançada! Você já tem o suficiente para ${o.titulo}.`, cor:"var(--emerald)"};
+  const mensal=poupancaMensal();
+  const meses=Math.ceil(falta/mensal);
+  let txt=`Você está a <b>${Math.round(pct*100)}%</b> de ${o.titulo}. Faltam <b>${fmt(falta)}</b>. No seu ritmo de guardar ${fmt(mensal)}/mês, chega em <b>~${meses} ${meses===1?'mês':'meses'}</b>.`;
+  let cor="var(--nu)";
+  if(o.prazoMeses){
+    if(meses<=o.prazoMeses){ txt+=` Está no caminho para o prazo de ${o.prazoMeses} meses. 💪`; cor="var(--emerald)"; }
+    else { txt+=` Nesse ritmo passa do prazo em <b>${meses-o.prazoMeses} ${(meses-o.prazoMeses)===1?'mês':'meses'}</b> — vale aumentar o aporte.`; cor="var(--amber)"; }
+  }
+  return {pct, txt, cor};
+}
+function cardObjetivos(){
+  const list=state.objetivos||[];
+  const form = objForm ? formObjetivo() : `<button class="btnG" style="width:100%;color:var(--nu);border-color:#CBEAD9" onclick="_g.novoObjetivo()">＋ Novo objetivo (viagem, carro...)</button>`;
+  const cards = list.map(o=>{
+    const a=apreciarObjetivo(o), t=OBJ_TEMAS[o.tipo]||OBJ_TEMAS.outro;
+    return `<div style="border:1px solid var(--line);border-radius:14px;padding:13px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:38px;height:38px;border-radius:11px;background:var(--greenSoft);display:flex;align-items:center;justify-content:center;font-size:20px;flex:none">${t.emoji}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14.5px;font-weight:800;color:var(--ink)">${o.titulo}</div>
+          <div style="font-size:11.5px;color:var(--mute)">${fmt(o.guardado)} de ${fmt(o.alvo)}${o.prazoMeses?` · meta em ${o.prazoMeses}m`:""}</div>
+        </div>
+        <div style="font-size:16px;font-weight:800;color:${a.cor}">${Math.round(a.pct*100)}%</div>
+      </div>
+      <div class="barTrack" style="margin-top:10px;background:var(--graphiteSoft);height:9px">
+        <div style="width:${Math.round(a.pct*100)}%;height:100%;border-radius:8px;background:linear-gradient(90deg,var(--ggreen),var(--emerald))"></div>
+      </div>
+      <div style="font-size:12px;color:var(--mute);line-height:1.45;margin-top:9px">${a.txt}</div>
+      <div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">
+        <button onclick="_g.aportarObjetivo('${o.id}')" style="flex:1;min-width:96px;background:var(--nu);border:none;color:#fff;font-size:12.5px;font-weight:700;padding:9px;border-radius:9px">＋ Guardar</button>
+        <button onclick="_g.perguntarObjetivoIA('${o.id}')" style="flex:1;min-width:96px;background:var(--grad-dash);border:none;color:#fff;font-size:12.5px;font-weight:700;padding:9px;border-radius:9px">🤖 GuavAI</button>
+        <button onclick="_g.excluirObjetivo('${o.id}')" style="background:none;border:1px solid var(--line);color:var(--gpink);font-size:12.5px;font-weight:700;padding:9px 12px;border-radius:9px">excluir</button>
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="card">
+    <div style="font-size:13px;font-weight:800;color:var(--ink);margin-bottom:4px">🎯 Meus objetivos</div>
+    <div style="font-size:11.5px;color:var(--mute);line-height:1.4;margin-bottom:12px">Defina metas como uma viagem ou um carro. O Guava acompanha o quanto falta e o GuavAI te diz se está perto ou longe.</div>
+    ${list.length?cards:`<div style="text-align:center;color:var(--mute);font-size:12.5px;padding:6px 0 12px">Nenhum objetivo ainda. Crie o primeiro abaixo. 🌱</div>`}
+    ${form}
+  </div>`;
+}
+function formObjetivo(){
+  const ed=objEdit?(state.objetivos||[]).find(x=>x.id===objEdit):null;
+  const tipos=Object.keys(OBJ_TEMAS);
+  const tipoSel=ed?ed.tipo:objTipoTmp;
+  return `<div style="border:1.5px dashed #CBEAD9;border-radius:14px;padding:13px;margin-top:4px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${tipos.map(t=>`<button onclick="_g.setTipoObj('${t}')" data-otipo="${t}" class="otipoBtn" style="border:1.5px solid ${tipoSel===t?'var(--nu)':'var(--line)'};background:${tipoSel===t?'var(--nu)':'#fff'};color:${tipoSel===t?'#fff':'var(--mute)'};border-radius:10px;padding:7px 11px;font-size:12px;font-weight:700">${OBJ_TEMAS[t].emoji} ${OBJ_TEMAS[t].label}</button>`).join("")}
+    </div>
+    <label class="fld">Nome do objetivo<input id="objTit" class="inp" value="${escapeAttr(ed?ed.titulo:'')}" placeholder="Ex: Viagem ao Japão"></label>
+    <div style="display:flex;gap:8px">
+      <label class="fld" style="flex:1">Valor total (R$)<input id="objAlvo" class="inp" type="number" inputmode="numeric" value="${ed?ed.alvo:''}" placeholder="0"></label>
+      <label class="fld" style="flex:1">Já guardado (R$)<input id="objGuard" class="inp" type="number" inputmode="numeric" value="${ed?ed.guardado:''}" placeholder="0"></label>
+    </div>
+    <label class="fld">Prazo em meses (opcional)<input id="objPrazo" class="inp" type="number" inputmode="numeric" value="${ed&&ed.prazoMeses?ed.prazoMeses:''}" placeholder="ex: 12"></label>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btnG" style="flex:1" onclick="_g.cancelarObjetivo()">cancelar</button>
+      <button class="btnP" style="flex:1" onclick="_g.salvarObjetivo()">${ed?'salvar':'criar objetivo'}</button>
+    </div>
+  </div>`;
+}
+G.novoObjetivo=()=>{ objForm=true; objEdit=null; objTipoTmp="viagem"; render(); };
+G.cancelarObjetivo=()=>{ objForm=false; objEdit=null; render(); };
+G.setTipoObj=t=>{ objTipoTmp=t; const ed=objEdit?(state.objetivos||[]).find(x=>x.id===objEdit):null; if(ed) ed.tipo=t;
+  document.querySelectorAll(".otipoBtn").forEach(btn=>{ const on=btn.getAttribute("data-otipo")===t;
+    btn.style.background=on?"var(--nu)":"#fff"; btn.style.color=on?"#fff":"var(--mute)"; btn.style.borderColor=on?"var(--nu)":"var(--line)"; }); };
+G.salvarObjetivo=()=>{
+  const g=id=>document.getElementById(id)?.value||"";
+  const titulo=g("objTit").trim()||"Objetivo";
+  const alvo=Number(g("objAlvo"))||0, guardado=Number(g("objGuard"))||0;
+  const prazoMeses=Number(g("objPrazo"))||0;
+  if(alvo<=0){ alert("Informe o valor total do objetivo."); return; }
+  state.objetivos=state.objetivos||[];
+  const ed=objEdit?state.objetivos.find(x=>x.id===objEdit):null;
+  if(ed){ Object.assign(ed,{titulo,alvo,guardado,prazoMeses,tipo:ed.tipo}); }
+  else { state.objetivos.push({id:"g"+Date.now(),tipo:objTipoTmp,titulo,alvo,guardado,prazoMeses}); }
+  objForm=false; objEdit=null; salvar(); render();
+};
+G.aportarObjetivo=id=>{
+  const o=(state.objetivos||[]).find(x=>x.id===id); if(!o) return;
+  const v=prompt(`Quanto guardar agora para "${o.titulo}"? (R$)`,"");
+  if(v===null) return;
+  const n=Number(String(v).replace(/[^\d]/g,""))||0;
+  if(n>0){ o.guardado=(+o.guardado||0)+n; salvar(); render(); }
+};
+G.excluirObjetivo=id=>{ if(!confirm("Excluir este objetivo?")) return; state.objetivos=(state.objetivos||[]).filter(x=>x.id!==id); salvar(); render(); };
+G.perguntarObjetivoIA=id=>{
+  const o=(state.objetivos||[]).find(x=>x.id===id); if(!o) return;
+  const a=apreciarObjetivo(o);
+  abrirChat();
+  // manda a apreciação como resposta imediata do GuavAI (funciona com ou sem IA);
+  // se a IA estiver ativa, o usuário pode continuar perguntando na sequência.
+  const resumo=`<b>${(OBJ_TEMAS[o.tipo]||OBJ_TEMAS.outro).emoji} ${o.titulo}</b><br>${a.txt}`;
+  const extra = cfg.funcaoUrl ? "<br><br>Quer que eu monte um plano de aportes para acelerar?" : "";
+  const msg={de:"ia", html:resumo+extra};
+  chatMsgs.push(msg); appendChatBubble(msg);
+};
 function cardHistorico(){
   const h=(state.historico||[]).filter(x=>x.fechado);
   if(!h.length) return `<div class="card" style="text-align:center;color:var(--mute);font-size:12.5px;padding:18px">
@@ -2449,7 +2574,7 @@ function ligarConfig(){
   };
   document.getElementById("resetar").onclick=()=>{
     if(!confirm("Apagar todas as despesas e recomeçar com os exemplos?")) return;
-    state={renda:20000,metaPct:0.20,horizonte:12,itens:seed.slice(),receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[]}; salvar(); render();
+    state={renda:20000,metaPct:0.20,horizonte:12,itens:seed.slice(),receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[],objetivos:[]}; salvar(); render();
   };
 }
 
