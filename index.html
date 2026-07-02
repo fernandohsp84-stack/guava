@@ -134,6 +134,17 @@ const CATEGORIAS=["Moradia","Mercado","Restaurante","Transporte","Saúde","Educa
 const NAT_LABEL={ordinaria:"Ordinária (mensal fixa)",estimada:"Estimada (a confirmar)",eventual:"Eventual (mês específico)",parcela:"Parcela do cartão"};
 const NAT_COR={ordinaria:"#0A2540",estimada:"#639FAB",eventual:"#004B49",parcela:"#FF6584"};
 const fmt=n=>(n<0?"-":"")+"R$ "+Math.abs(Math.round(n)).toLocaleString("pt-BR");
+// --- moeda com centavos ---
+// aceita "60,67", "1.234,56", "60.67", "1500" e devolve Número (ex.: 60.67)
+const parseMoeda=s=>{ if(s==null) return 0; s=String(s).trim(); if(!s) return 0;
+  s=s.replace(/[^\d.,-]/g,"");
+  if(s.indexOf(",")>=0){ s=s.replace(/\./g,"").replace(",","."); } // vírgula = decimal, ponto = milhar
+  const n=Number(s); return isNaN(n)?0:n; };
+const parseInt10=s=>{ const n=parseInt(String(s==null?"":s).replace(/[^\d-]/g,""),10); return isNaN(n)?0:n; };
+// valor para exibir DENTRO do input (usa vírgula, sem separador de milhar, sem forçar ,00)
+const fmtInput=v=>{ if(v==null||v==="") return ""; const n=Number(v); if(isNaN(n)) return ""; return Number.isInteger(n)?String(n):String(n).replace(".",","); };
+// exibição de valor de despesa com centavos quando houver (ex.: R$ 60,67 / R$ 1.500)
+const fmtV=n=>{ const neg=n<0; let x=Math.abs(n); const casas=(Math.round(x*100)%100)?2:0; return (neg?"-":"")+"R$ "+x.toLocaleString("pt-BR",{minimumFractionDigits:casas,maximumFractionDigits:2}); };
 const provavel=it=>it.natureza==="estimada"?(((+it.min||0)+(+it.max||0))/2):(+it.valor||0);
 const escapeAttr=s=>String(s==null?"":s).replace(/"/g,"&quot;").replace(/</g,"&lt;");
 
@@ -207,12 +218,26 @@ const seed=[
 ];
 
 // ---------- persistência local ----------
+// A CHAVE abaixo NUNCA deve mudar entre versões do app: é o que garante que os
+// valores editados/incluídos/excluídos permaneçam ao atualizar a versão publicada
+// (localStorage é por origem+chave; mantendo a mesma URL e a mesma chave, os dados
+// do usuário são preservados e apenas mesclados com eventuais campos novos).
 const LS_STATE="guava_state_v1", LS_CFG="guava_cfg_v1";
 function carregarLocal(){
-  try{ const s=localStorage.getItem(LS_STATE); if(s) state={...state,...JSON.parse(s)}; else state.itens=seed; }
-  catch{ state.itens=seed; }
+  let salvo=null;
+  try{ const s=localStorage.getItem(LS_STATE); if(s) salvo=JSON.parse(s); }catch{ salvo=null; }
+  if(salvo && typeof salvo==="object"){
+    // mescla: mantém campos novos dos defaults e preserva TODOS os dados do usuário
+    state={...state,...salvo};
+    // garante arrays essenciais mesmo que a versão salva seja antiga
+    if(!Array.isArray(state.itens)) state.itens=[];
+    for(const k of ["receitas","historico","incentivos","serieHistorica","objetivos"]) if(!Array.isArray(state[k])) state[k]=[];
+    if(typeof state.pagosMes!=="object"||!state.pagosMes) state.pagosMes={};
+  } else {
+    // primeira vez neste aparelho: começa com as despesas de exemplo
+    state.itens=seed;
+  }
   try{ const c=localStorage.getItem(LS_CFG); if(c){ const padraoFb=cfg.firebase; cfg={...cfg,...JSON.parse(c)}; if(!cfg.firebase) cfg.firebase=padraoFb; } }catch{}
-  // URL de fábrica: usada se o usuário ainda não definiu uma própria
   if(!cfg.funcaoUrl && FUNCAO_URL_PADRAO) cfg.funcaoUrl = FUNCAO_URL_PADRAO;
 }
 function salvarLocal(){ try{ localStorage.setItem(LS_STATE,JSON.stringify(state)); }catch{} }
@@ -289,21 +314,31 @@ async function iniciarFirebase(){
       if(snap.exists()){ state={...state,...snap.data()}; salvarLocal(); render(); }
       else { await gravarFirebase(); }
       if(fb.unsub) fb.unsub();
-      // PATCH: ignora o "eco" de escritas locais pendentes (metadata.hasPendingWrites).
-      // Antes, cada salvar() gerava um onSnapshot extra que refazia o render() inteiro
-      // logo depois do usuário interagir — dobrando o "piscar" na tela.
+      // PATCH: ignora o "eco" de escritas locais pendentes (metadata.hasPendingWrites)
+      // E TAMBÉM o eco já confirmado pelo servidor (que antes disparava um render()
+      // no meio da digitação, tirando o foco do campo). Além disso, nunca re-renderiza
+      // enquanto o usuário está com um campo em edição — a atualização remota fica
+      // pendente e é aplicada assim que o foco sai do campo.
       fb.unsub=onSnapshot(fb.ref,{includeMetadataChanges:true},d=>{
         if(d.metadata && d.metadata.hasPendingWrites) return;
-        if(d.exists()){ state={...state,...d.data()}; salvarLocal(); render(); }
+        if(!d.exists()) return;
+        const inc=JSON.stringify(d.data());
+        if(inc===fb.lastWrite){ state={...state,...d.data()}; salvarLocal(); return; } // nosso próprio eco: aplica sem redesenhar
+        if(usuarioEditando()){ fb._pendente=d.data(); return; }                       // não destrói o campo em foco
+        state={...state,...d.data()}; salvarLocal(); render();
       });
     });
   }catch(e){ banner("Não consegui iniciar o Firebase. Verifique a configuração em ⚙️."); }
 }
 async function gravarFirebase(){
   if(!fb.ref||!fb._api) return;
-  try{ await fb._api.setDoc(fb.ref,state,{merge:true}); }
+  const payload={...state};
+  fb.lastWrite=JSON.stringify(payload); // usado para reconhecer e ignorar o próprio eco
+  try{ await fb._api.setDoc(fb.ref,payload,{merge:true}); }
   catch(e){ /* mantém local; tenta de novo no próximo save */ }
 }
+// verdadeiro enquanto o usuário digita/seleciona em um campo (protege o foco)
+function usuarioEditando(){ const a=document.activeElement; return !!a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName); }
 let bannerMsg="";
 function banner(m){ bannerMsg=m; const el=document.getElementById("bannerSlot"); if(el) el.innerHTML=m?`<div class="banner">${m}</div>`:""; }
 
@@ -1798,7 +1833,7 @@ function itemCard(it){
         <div style="font-size:11.5px;color:var(--mute);margin-top:3px;margin-left:15px">${sub}</div>
       </div>
       <div style="text-align:right;flex:none">
-        <div style="font-weight:800;font-size:15px;color:${NAT_COR[it.natureza]}">${fmt(v)}${it.natureza==="estimada"?' <span style="font-size:10px;color:var(--mute)">~</span>':''}</div>
+        <div style="font-weight:800;font-size:15px;color:${NAT_COR[it.natureza]}">${fmtV(v)}${it.natureza==="estimada"?' <span style="font-size:10px;color:var(--mute)">~</span>':''}</div>
         <div style="display:flex;gap:14px;justify-content:flex-end;margin-top:6px">
           <button onclick="_g.editar('${it.id}')" style="background:none;border:none;color:var(--blue);font-size:13px;font-weight:600;padding:2px">editar</button>
           <button onclick="_g.excluir('${it.id}')" style="background:none;border:none;color:var(--guava);font-size:13px;font-weight:600;padding:2px">excluir</button>
@@ -1820,7 +1855,12 @@ G.editar=id=>{
 function renderEdicao(id){
   const it=state.itens.find(x=>x.id===id), box=document.getElementById("ed-"+id);
   if(!it||!box) return;
-  const campo=(lb,key,val,type="text")=>`<label class="fld">${lb}<input class="inp" type="${type}" ${type==='number'?'inputmode="numeric"':''} value="${escapeAttr(val)}" oninput="_g.campo('${id}','${key}',this.value,${type==='number'})"></label>`;
+  const campo=(lb,key,val,type="text")=>{
+    const money = type==="number";
+    const inputmode = money ? "decimal" : "";
+    const vShown = money ? fmtInput(val) : escapeAttr(val);
+    return `<label class="fld">${lb}<input class="inp" type="${money?'text':type}" ${inputmode?`inputmode="${inputmode}"`:''} value="${vShown}" oninput="_g.campo('${id}','${key}',this.value,${money})"></label>`;
+  };
   // seletor de natureza (reclassificação)
   const natBtn=nat=>`<button onclick="_g.setNatItem('${id}','${nat}')" style="flex:1;padding:8px 0;border-radius:9px;border:1.5px solid ${it.natureza===nat?NAT_COR[nat]:'var(--line)'};background:${it.natureza===nat?NAT_COR[nat]:'#F4F0FA'};color:${it.natureza===nat?'#fff':'var(--mute)'};font-size:11px;font-weight:700">${NAT_LABEL[nat].split(" ")[0]}</button>`;
   let html=`<label class="fld" style="margin-bottom:2px">Tipo de despesa</label>
@@ -1849,10 +1889,13 @@ G.setNatItem=(id,nat)=>{
   render(); // re-renderiza a lista (atualiza valor/subtítulo do card) e reabre a edição
 };
 G.campo=(id,key,val,num)=>{
-  const patch={[key]:num?(val===""?0:Number(val)):val};
+  let v;
+  if(num){ v = (key==="restam"||key==="mesIdx") ? parseInt10(val) : parseMoeda(val); }
+  else v = val;
+  const patch={[key]:v};
   if(key==="valor"||key==="restam"){
     const it=state.itens.find(x=>x.id===id);
-    if(it&&it.natureza==="parcela"){ const valor=key==="valor"?Number(val)||0:(+it.valor||0); const restam=key==="restam"?Number(val)||0:(+it.restam||0); patch.total=valor*restam; }
+    if(it&&it.natureza==="parcela"){ const valor=key==="valor"?v:(+it.valor||0); const restam=key==="restam"?v:(+it.restam||0); patch.total=valor*restam; }
   }
   atualizar(id,patch);
 };
@@ -2062,7 +2105,7 @@ function cardReceitaExtra(){
     <div style="font-size:11.5px;color:#7DE8D2;margin:4px 0 12px">13º, PLR, bônus, restituição... entra num mês específico e melhora o saldo e o escore daquele mês.</div>
     <input id="recNome" placeholder="Ex: 13º salário" style="width:100%;border:none;border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px;color:#241A45">
     <div style="display:flex;gap:8px">
-      <input id="recValor" type="number" inputmode="numeric" placeholder="Valor R$" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;color:#241A45">
+      <input id="recValor" type="text" inputmode="decimal" placeholder="Valor R$" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;color:#241A45">
       <select id="recMes" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;background:#fff;color:#241A45">${meses}</select>
     </div>
     <button class="btnP" style="width:100%;margin-top:10px;background:var(--ggreen);color:#063" onclick="_g.addReceita()">adicionar receita</button>
@@ -2071,7 +2114,7 @@ function cardReceitaExtra(){
 }
 G.addReceita=()=>{
   const nome=document.getElementById("recNome")?.value?.trim()||"Receita extra";
-  const valor=Number(document.getElementById("recValor")?.value)||0;
+  const valor=parseMoeda(document.getElementById("recValor")?.value)||0;
   const mesIdx=Number(document.getElementById("recMes")?.value)||0;
   if(valor<=0){ status("Informe um valor para a receita.",true); return; }
   state.receitas=state.receitas||[];
@@ -2277,7 +2320,9 @@ function mostrarResultado(itens){
     <button class="btnG" style="width:100%;margin-top:12px" onclick="_g.incluirTodos()">incluir todos</button></div>`;
 }
 function campoMini(i,key,label,val){
-  return `<label style="flex:1;font-size:10px;color:var(--mute)">${label}<input type="number" inputmode="numeric" value="${val!=null?val:''}" oninput="_g.setCampo(${i},'${key}',this.value)" style="width:100%;border:1.5px solid var(--line);border-radius:8px;padding:7px;font-size:13px;margin-top:2px"></label>`;
+  const inteiro=(key==="restam"||key==="mesIdx");
+  const vShown = inteiro ? (val!=null?val:'') : fmtInput(val);
+  return `<label style="flex:1;font-size:10px;color:var(--mute)">${label}<input type="text" inputmode="${inteiro?'numeric':'decimal'}" value="${vShown}" oninput="_g.setCampo(${i},'${key}',this.value)" style="width:100%;border:1.5px solid var(--line);border-radius:8px;padding:7px;font-size:13px;margin-top:2px"></label>`;
 }
 G.setNat=(i,nat)=>{ if(!resultadoTmp||!resultadoTmp[i])return; const it=resultadoTmp[i]; it.natureza=nat;
   // defaults sensatos ao trocar de tipo
@@ -2287,7 +2332,7 @@ G.setNat=(i,nat)=>{ if(!resultadoTmp||!resultadoTmp[i])return; const it=resultad
   mostrarResultado(resultadoTmp); };
 G.setNome=(i,v)=>{ if(resultadoTmp&&resultadoTmp[i]) resultadoTmp[i].nome=v; };
 G.setCat=(i,v)=>{ if(resultadoTmp&&resultadoTmp[i]) resultadoTmp[i].cat=v; };
-G.setCampo=(i,key,v)=>{ if(resultadoTmp&&resultadoTmp[i]) resultadoTmp[i][key]=v===""?null:Number(v); };
+G.setCampo=(i,key,v)=>{ if(resultadoTmp&&resultadoTmp[i]){ const val=(key==="restam"||key==="mesIdx")?parseInt10(v):parseMoeda(v); resultadoTmp[i][key]= (v===""?null:val); } };
 G.incluir=i=>{ const it=resultadoTmp&&resultadoTmp[i]; if(!it) return; lancar(normaliza(it)); resultadoTmp.splice(i,1); if(resultadoTmp.length) mostrarResultado(resultadoTmp); else { document.getElementById("addResult").innerHTML=""; status("Incluído ✓ — veja em Despesas.",false); } };
 G.incluirTodos=()=>{ if(!resultadoTmp) return; resultadoTmp.forEach(it=>lancar(normaliza(it))); resultadoTmp=null; document.getElementById("addResult").innerHTML=""; status("Tudo incluído ✓",false); };
 function normaliza(it){
@@ -2549,8 +2594,8 @@ function ligarConfig(){
 
 // ---------- renda ----------
 G.editRenda=()=>{
-  const novo=prompt("Renda mensal (R$):",state.renda);
-  if(novo!==null){ const n=Number(String(novo).replace(/[^\d]/g,"")); if(n>0){ state.renda=n; salvar(); render(); } }
+  const novo=prompt("Renda mensal (R$):",fmtInput(state.renda));
+  if(novo!==null){ const n=parseMoeda(novo); if(n>0){ state.renda=n; salvar(); render(); } }
 };
 document.getElementById("rendaBtn").onclick=G.editRenda;
 
@@ -2559,6 +2604,11 @@ carregarLocal();
 registrarSnapshot();
 render();
 iniciarFirebase();
+// quando o usuário sai de um campo, aplica qualquer atualização remota que ficou
+// pendente durante a edição (sem interromper a digitação enquanto ela acontecia)
+document.addEventListener("focusout",()=>{
+  if(fb._pendente){ const d=fb._pendente; fb._pendente=null; state={...state,...d}; salvarLocal(); setTimeout(render,60); }
+});
 </script>
 </body>
 </html>
