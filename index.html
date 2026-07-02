@@ -889,7 +889,8 @@ function renderNav(){
 // ---------- Início ----------
 function viewInicio(){
   const p=projecao(), m=p[0];
-  const disponivel=state.renda-m.total, guardadoAlvo=state.renda*state.metaPct;
+  const rendaMesAtual=m.rendaMes||state.renda;              // renda base + receitas extras do mês atual
+  const disponivel=rendaMesAtual-m.total, guardadoAlvo=state.renda*state.metaPct;
   const fechaMeta=disponivel>=guardadoAlvo;
   const pctGasto=Math.min(m.total/Math.max(state.renda,1),1), proximoTeto=pctGasto>0.85;
   const semBackend=!cfg.funcaoUrl;
@@ -920,10 +921,10 @@ function viewInicio(){
         <div style="font-size:14px;font-weight:700;color:#fff">Disponível p/ gastar</div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
           ${svgCarteira()}
-          ${svgGauge(Math.max(0,Math.min(disponivel/Math.max(state.renda,1),1)))}
+          ${svgGauge(Math.max(0,Math.min(disponivel/Math.max(rendaMesAtual,1),1)))}
         </div>
         <div style="font-size:26px;font-weight:800;color:#fff;margin-top:10px;letter-spacing:-.5px">${fmt(disponivel)}</div>
-        <div style="font-size:10.5px;color:#9FC3D6;margin-top:2px">de ${fmt(state.renda)} de renda</div>
+        <div style="font-size:10.5px;color:#9FC3D6;margin-top:2px">de ${fmt(rendaMesAtual)} de renda${m.extra>0?` <span style="color:#FFD98A">· +${fmt(m.extra)} extra</span>`:""}</div>
       </div>
       <div class="card" style="background:linear-gradient(160deg,#A9C4E8 0%,#7FA3D6 100%);border:none;color:#fff;padding:16px 14px;position:relative;overflow:hidden;border-radius:22px;box-shadow:0 10px 26px rgba(127,163,214,.4)">
         <div style="font-size:14px;font-weight:700;color:#fff">Metas de Poupança</div>
@@ -981,7 +982,9 @@ function cardVisaoFuturo(p, esc){
   const serieRenda=p.map(x=>x.rendaMes||state.renda); // renda + receitas extras por mês
   const temExtra=p.some(x=>(x.extra||0)>0);
   const n=serie.length;
-  const maxV=Math.max(state.renda, ...serie, ...serieRenda)*1.10, minV=Math.min(...serie)*0.82;
+  // ESCALA baseada na renda base + despesas (NÃO na receita extra), para uma
+  // renda extra grande num único mês não achatar todo o gráfico.
+  const maxV=Math.max(state.renda, ...serie)*1.12, minV=Math.min(...serie)*0.82;
   const px=i=>(i/(n-1))*W;
   const py=v=>(H-footH)-((v-minV)/(maxV-minV||1))*(H-footH-14)+8;
   function pathDe(vals){
@@ -999,22 +1002,22 @@ function cardVisaoFuturo(p, esc){
   const ondaAzul=(()=>{ const vals=serie.map((v,i)=> minV + (maxV-minV)*0.28 + 7*Math.sin(i/1.4+1.2));
     return `<path d="${pathDe(vals)} L ${W} ${H-footH} L 0 ${H-footH} Z" fill="url(#gAuroraBlue)"/>`; })();
   const rendaY=py(state.renda);
-  // linha de RENDA por mês (renda base + receitas extras). Nos meses com receita
-  // extra ela sobe, mostrando visualmente o fôlego adicional no caixa.
-  const linhaRenda=(()=>{
-    let d=`M0 ${py(serieRenda[0]).toFixed(1)}`;
-    for(let i=1;i<n;i++){ const xc=((px(i-1)+px(i))/2).toFixed(1); d+=` C ${xc} ${py(serieRenda[i-1]).toFixed(1)}, ${xc} ${py(serieRenda[i]).toFixed(1)}, ${px(i).toFixed(1)} ${py(serieRenda[i]).toFixed(1)}`; }
-    return d;
-  })();
-  const rendaLine = temExtra
-    ? `<path d="${linhaRenda}" fill="none" stroke="#FFD98A" stroke-width="2" stroke-dasharray="5 5" opacity="0.85"/>`
-    : `<line x1="0" y1="${rendaY.toFixed(1)}" x2="${W}" y2="${rendaY.toFixed(1)}" stroke="#fff" stroke-dasharray="4 5" opacity="0.28"/>`;
-  // marcadores de receita extra: ponto dourado + rótulo "+R$" no mês
+  // Linha de renda: base (achatada). A receita extra NÃO estica a linha — em vez
+  // disso é marcada como um "ponto acima" da linha de renda, com rótulo do valor.
+  const rendaLine = `<line x1="0" y1="${rendaY.toFixed(1)}" x2="${W}" y2="${rendaY.toFixed(1)}" stroke="${temExtra?'#FFD98A':'#fff'}" stroke-dasharray="4 5" opacity="${temExtra?'0.6':'0.28'}"/>`;
+  // marcadores de receita extra: um ponto dourado logo ACIMA da linha de renda
+  // (posição proporcional, mas limitada ao topo p/ não distorcer), com "+valor".
+  const fmtK=v=> v>=1000 ? "+"+(Math.round(v/100)/10).toString().replace(/\.0$/,'')+"k" : "+"+Math.round(v);
   const marcasExtra = p.map((x,i)=>{
     if(!(x.extra>0)) return "";
-    const X=px(i), Y=py(serieRenda[i]);
-    const lbl = i<n-1 ? `<text x="${(X+4).toFixed(1)}" y="${(Y-6).toFixed(1)}" fill="#FFE9B8" font-size="8" font-weight="700">+${Math.round(x.extra/1000)>0?Math.round(x.extra/1000)+'k':x.extra}</text>` : "";
-    return `<circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="9" fill="#FFD98A" opacity=".28"/><circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="4.5" fill="#FFC94D" stroke="#fff" stroke-width="1.2"/>${lbl}`;
+    const X=px(i);
+    const Yreal=py(serieRenda[i]);
+    const Y=Math.max(Yreal, 12);            // limita ao topo: extra gigante não escapa
+    const lblX=Math.min(Math.max(X+5,2),W-30);
+    return `<line x1="${X.toFixed(1)}" y1="${rendaY.toFixed(1)}" x2="${X.toFixed(1)}" y2="${Y.toFixed(1)}" stroke="#FFD98A" stroke-width="1" stroke-dasharray="2 3" opacity=".7"/>
+      <circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="8" fill="#FFD98A" opacity=".25"/>
+      <circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="4.2" fill="#FFC94D" stroke="#fff" stroke-width="1.1"/>
+      <text x="${lblX.toFixed(1)}" y="${(Y-6).toFixed(1)}" fill="#FFE9B8" font-size="8.5" font-weight="800">${fmtK(x.extra)}</text>`;
   }).join("");
   // pontos brancos brilhantes + hastes pontilhadas até a base
   const pontos=serie.map((v,i)=>{
