@@ -520,7 +520,10 @@ const Analise={
 };
 // receita extra (não recorrente) de um mês i
 function receitaExtraMes(i){
-  return (state.receitas||[]).reduce((s,r)=>s+((+r.mesIdx||0)===i?(+r.valor||0):0),0);
+  return (state.receitas||[]).reduce((s,r)=>{
+    if(r.recorrente) return s+(+r.valor||0);          // recorrente: entra em todo mês
+    return s+((+r.mesIdx||0)===i?(+r.valor||0):0);     // não recorrente: só no mês escolhido
+  },0);
 }
 function projecao(){
   const now=new Date(),out=[];
@@ -975,8 +978,10 @@ function cardGuavAICentral(alerta){
 function cardVisaoFuturo(p, esc){
   const W=340, H=215, footH=26; // footH = faixa dos meses dentro do card
   const serie=p.map(x=>x.total);
+  const serieRenda=p.map(x=>x.rendaMes||state.renda); // renda + receitas extras por mês
+  const temExtra=p.some(x=>(x.extra||0)>0);
   const n=serie.length;
-  const maxV=Math.max(state.renda, ...serie)*1.12, minV=Math.min(...serie)*0.82;
+  const maxV=Math.max(state.renda, ...serie, ...serieRenda)*1.10, minV=Math.min(...serie)*0.82;
   const px=i=>(i/(n-1))*W;
   const py=v=>(H-footH)-((v-minV)/(maxV-minV||1))*(H-footH-14)+8;
   function pathDe(vals){
@@ -994,6 +999,23 @@ function cardVisaoFuturo(p, esc){
   const ondaAzul=(()=>{ const vals=serie.map((v,i)=> minV + (maxV-minV)*0.28 + 7*Math.sin(i/1.4+1.2));
     return `<path d="${pathDe(vals)} L ${W} ${H-footH} L 0 ${H-footH} Z" fill="url(#gAuroraBlue)"/>`; })();
   const rendaY=py(state.renda);
+  // linha de RENDA por mês (renda base + receitas extras). Nos meses com receita
+  // extra ela sobe, mostrando visualmente o fôlego adicional no caixa.
+  const linhaRenda=(()=>{
+    let d=`M0 ${py(serieRenda[0]).toFixed(1)}`;
+    for(let i=1;i<n;i++){ const xc=((px(i-1)+px(i))/2).toFixed(1); d+=` C ${xc} ${py(serieRenda[i-1]).toFixed(1)}, ${xc} ${py(serieRenda[i]).toFixed(1)}, ${px(i).toFixed(1)} ${py(serieRenda[i]).toFixed(1)}`; }
+    return d;
+  })();
+  const rendaLine = temExtra
+    ? `<path d="${linhaRenda}" fill="none" stroke="#FFD98A" stroke-width="2" stroke-dasharray="5 5" opacity="0.85"/>`
+    : `<line x1="0" y1="${rendaY.toFixed(1)}" x2="${W}" y2="${rendaY.toFixed(1)}" stroke="#fff" stroke-dasharray="4 5" opacity="0.28"/>`;
+  // marcadores de receita extra: ponto dourado + rótulo "+R$" no mês
+  const marcasExtra = p.map((x,i)=>{
+    if(!(x.extra>0)) return "";
+    const X=px(i), Y=py(serieRenda[i]);
+    const lbl = i<n-1 ? `<text x="${(X+4).toFixed(1)}" y="${(Y-6).toFixed(1)}" fill="#FFE9B8" font-size="8" font-weight="700">+${Math.round(x.extra/1000)>0?Math.round(x.extra/1000)+'k':x.extra}</text>` : "";
+    return `<circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="9" fill="#FFD98A" opacity=".28"/><circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="4.5" fill="#FFC94D" stroke="#fff" stroke-width="1.2"/>${lbl}`;
+  }).join("");
   // pontos brancos brilhantes + hastes pontilhadas até a base
   const pontos=serie.map((v,i)=>{
     if(i===n-1) return "";
@@ -1016,6 +1038,7 @@ function cardVisaoFuturo(p, esc){
     <div style="position:absolute;inset:0;background:radial-gradient(420px 220px at 80% -10%, rgba(120,230,180,.18), transparent 62%);pointer-events:none"></div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;position:relative">
       <span style="font-size:17px;font-weight:800;color:#fff">Visão de Futuro <span style="color:#BEE3CC;font-weight:600">(${state.horizonte} meses)</span></span>
+      ${temExtra?`<span style="font-size:10px;color:#FFD98A;font-weight:700">● renda +extras</span>`:""}
     </div>
     <div style="position:relative">
       <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block;overflow:visible">
@@ -1034,8 +1057,8 @@ function cardVisaoFuturo(p, esc){
         <path d="${area}" fill="url(#gAuroraTeal)"/>
         ${ondaAzul}
         <path d="${linha}" fill="none" stroke="#D8FFE8" stroke-width="2.5" filter="url(#glowTeal)"/>
-        <line x1="0" y1="${rendaY.toFixed(1)}" x2="${W}" y2="${rendaY.toFixed(1)}" stroke="#fff" stroke-dasharray="4 5" opacity="0.28"/>
-        ${pontos}${pico}
+        ${rendaLine}
+        ${pontos}${pico}${marcasExtra}
       </svg>
       <!-- pílula de renda (topo) -->
       <button onclick="_g.editRenda()" style="position:absolute;top:-4px;right:2px;background:rgba(255,255,255,.95);border:none;border-radius:16px;padding:6px 14px;font-size:14px;font-weight:800;color:#14324E;box-shadow:0 4px 14px rgba(0,0,0,.3)">${fmt(state.renda)} <span style="font-size:11px">✏️</span></button>
@@ -1446,15 +1469,8 @@ G.chatEnviar=async()=>{
   const intReceita = !ehPergunta && temNum && /\b(recebi|receita|entrou|ganhei|sal[aá]rio|freela|b[oô]nus|13[ºo]|reembolso|extra de|caiu|pix de)\b/.test(low);
   const intDespesa = !ehPergunta && temNum && /\b(gastei|paguei|comprei|gasto de|despesa|parcel|parcelei|lanc|lançar|registrar?|adicionar?|assinatura|conta de|boleto)\b/.test(low);
   if(intReceita){
-    const rc=receitaDoTexto(q);
-    if(rc.valor>0){
-      state.receitas=state.receitas||[];
-      state.receitas.push({id:"r"+Date.now(),nome:rc.nome,valor:rc.valor,mesIdx:rc.mesIdx,cat:"Receita"});
-      salvar();
-      const quando = rc.mesIdx? ` para ${MESES[(new Date().getMonth()+rc.mesIdx)%12]}` : " neste mês";
-      const m={de:"ia", html:`Registrei a receita <b>${rc.nome}</b> de <b>${fmtV(rc.valor)}</b>${quando}. 💚 Veja o efeito na aba Projeção.`};
-      chatMsgs.push(m); appendChatBubble(m); return;
-    }
+    const rs=receitasDoTexto(q);
+    if(rs.length){ propostaChat(rs.map(r=>({_receita:true, ...r}))); return; }
   }
   if(intDespesa){
     setChatEstado("computing");
@@ -1480,18 +1496,42 @@ G.chatEnviar=async()=>{
   setChatEstado("idle");
 };
 // ---- GuavAI: ler foto/PDF e propor lançamentos, e registrar por texto ----
-function receitaDoTexto(t){
-  const low=t.toLowerCase();
-  const mval=low.match(/(\d[\d.,]*)/); const valor=mval?num(mval[1]):0;
-  let mesIdx=0; const mm=low.match(/\b(?:em|no|na)\s+([a-zç]+)/); if(mm){ const idx=mesParaIdx(mm[1]); if(idx!=null) mesIdx=idx; }
-  let nome=limpaNome(t);
-  nome=nome.replace(/^\s*(recebi|ganhei|entrou|caiu|receita|pix)\s*/i,"").trim();
-  return {valor, mesIdx, nome:nome||"Receita extra"};
+// rótulo curto de mês a partir do offset (0 = este mês)
+function mesLabelIdx(i){ const d=new Date(); d.setMonth(d.getMonth()+(+i||0)); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; }
+// separa uma fala em VÁRIAS receitas (por ";", ",", " e ", "/", quebras de linha)
+function receitasDoTexto(t){
+  // protege faixas/parcelas e divide também por "/"
+  let s=t.replace(/(entre\s*\d[\d.,]*)\s*(e|a|até)\s*(\d[\d.,]*)/gi,"$1<E>$3");
+  const partes=s.split(/[;\n\/]+|,| e | também | tambem | mais /i).map(x=>x.replace(/<E>/g," e ").trim()).filter(Boolean);
+  const out=[];
+  for(const parte of partes){
+    const low=parte.toLowerCase();
+    const mval=low.match(/(\d[\d.,]+|\d+)/); if(!mval) continue;
+    const valor=num(mval[1]); if(valor<=0) continue;
+    let mesIdx=0, recorrente=false;
+    if(/\b(todo\s*m[êe]s|mensal|recorrente|todos os meses|por m[êe]s|fixo)\b/.test(low)) recorrente=true;
+    const mm=low.match(/\b(janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i);
+    if(mm){ const idx=mesParaIdx(mm[1].toLowerCase().replace("marco","março")); if(idx!=null) mesIdx=idx; }
+    let nome=limpaNome(parte).replace(/^\s*(recebi|ganhei|entrou|caiu|receita|pix|adicione?|acrescente?|incluir?|referente a|de|do|da)\s*/i,"").trim();
+    if(!nome) nome="Receita extra";
+    out.push({nome, valor, mesIdx, recorrente});
+  }
+  // fallback: nenhuma parte casou mas há um número na frase toda
+  if(!out.length){
+    const mv=t.toLowerCase().match(/(\d[\d.,]+|\d+)/);
+    if(mv){ const v=num(mv[1]); if(v>0) out.push({nome:"Receita extra", valor:v, mesIdx:0, recorrente:false}); }
+  }
+  return out;
 }
 let chatProposta=null;
 function propostaChat(itens){
-  chatProposta=itens.map(normaliza);
+  // aceita despesas (com natureza) e receitas (com _receita)
+  chatProposta = itens.map(it=> it._receita ? it : normaliza(it));
   const linhas=chatProposta.map(it=>{
+    if(it._receita){
+      const quando = it.recorrente ? "todo mês" : mesLabelIdx(it.mesIdx);
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>💰 ${it.nome} <span style="color:#8aa2ad;font-size:11px">·receita ${quando}</span></span><b style="color:var(--emerald)">+${fmtV(it.valor)}</b></div>`;
+    }
     const v = it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
     return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>${it.nome} <span style="color:#8aa2ad;font-size:11px">·${NAT_LABEL[it.natureza].split(" ")[0]}</span></span><b>${fmtV(v)}</b></div>`;
   }).join("");
@@ -1501,13 +1541,19 @@ function propostaChat(itens){
       <button onclick="_g.chatIncluirProposta()" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:13px;padding:9px;border-radius:9px">incluir ${n===1?'':'tudo'}</button>
       <button onclick="_g.chatDescartarProposta()" style="background:none;border:1px solid #cfd6dd;color:#8895a5;font-weight:700;font-size:13px;padding:9px 12px;border-radius:9px">descartar</button>
     </div>
-    <div style="font-size:11px;color:#8895a5;margin-top:6px">Depois é só ajustar tipo/valor na aba Despesas.</div>`;
+    <div style="font-size:11px;color:#8895a5;margin-top:6px">Depois é só ajustar na aba Despesas ou ➕ Adicionar.</div>`;
   const m={de:"ia", html}; chatMsgs.push(m); appendChatBubble(m);
 }
 G.chatIncluirProposta=()=>{
   if(!chatProposta||!chatProposta.length) return;
-  const n=chatProposta.length; chatProposta.forEach(it=>lancar(it)); chatProposta=null;
-  const m={de:"ia", html:`Pronto! Incluí ${n} ${n===1?'lançamento':'lançamentos'} nas suas despesas. ✅ Veja em Despesas ou na Projeção.`};
+  let nd=0,nr=0;
+  chatProposta.forEach((it,k)=>{
+    if(it._receita){ state.receitas=state.receitas||[]; state.receitas.push({id:"r"+Date.now()+"_"+k,nome:it.nome,valor:it.valor,mesIdx:it.recorrente?0:(+it.mesIdx||0),recorrente:!!it.recorrente,cat:"Receita"}); nr++; }
+    else { lancar(it); nd++; }
+  });
+  chatProposta=null;
+  const partes=[]; if(nd) partes.push(`${nd} ${nd===1?'despesa':'despesas'}`); if(nr) partes.push(`${nr} ${nr===1?'receita':'receitas'}`);
+  const m={de:"ia", html:`Pronto! Incluí ${partes.join(" e ")}. ✅ Veja o efeito no gráfico e na Projeção.`};
   chatMsgs.push(m); appendChatBubble(m); salvar();
 };
 G.chatDescartarProposta=()=>{
@@ -2295,29 +2341,38 @@ function viewAdd(){
     ${corpo}<div id="addStatus"></div><div id="addResult"></div>
     ${cardReceitaExtra()}</div>`;
 }
-// formulário de receita não recorrente (13º, PLR, bônus...)
+// formulário de receita (recorrente ou não): 13º, PLR, bônus, aluguel recebido...
+let recRecorrente=false;
 function cardReceitaExtra(){
   const meses=[]; const now=new Date();
   for(let i=0;i<state.horizonte;i++){ const d=new Date(now.getFullYear(),now.getMonth()+i,1); meses.push(`<option value="${i}">${MESES[d.getMonth()]}/${d.getFullYear()}${i===0?' (este mês)':''}</option>`); }
+  const seg=(on,txt,val)=>`<button onclick="_g.setRecRecorrente(${val})" style="flex:1;padding:9px 0;border-radius:9px;border:1.5px solid ${on?'#7DE8D2':'rgba(255,255,255,.25)'};background:${on?'#7DE8D2':'transparent'};color:${on?'#063D38':'#CFF3E6'};font-size:12px;font-weight:700">${txt}</button>`;
   return `<div class="card" style="background:linear-gradient(155deg,#0E5C4E,#063D38);border:none;color:#fff;margin-top:8px">
-    <div style="font-size:14px;font-weight:800;display:flex;align-items:center;gap:7px">💰 Receita extra (não recorrente)</div>
-    <div style="font-size:11.5px;color:#7DE8D2;margin:4px 0 12px">13º, PLR, bônus, restituição... entra num mês específico e melhora o saldo e o escore daquele mês.</div>
-    <input id="recNome" placeholder="Ex: 13º salário" style="width:100%;border:none;border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px;color:#241A45">
+    <div style="font-size:14px;font-weight:800;display:flex;align-items:center;gap:7px">💰 Adicionar receita</div>
+    <div style="font-size:11.5px;color:#7DE8D2;margin:4px 0 12px">Salário extra, 13º, PLR, bônus, restituição, aluguel recebido... entra no fluxo e melhora saldo e escore.</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">${seg(!recRecorrente,"Só num mês",false)}${seg(recRecorrente,"Todo mês (recorrente)",true)}</div>
+    <input id="recNome" placeholder="Ex: 13º salário / Aluguel recebido" style="width:100%;border:none;border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px;color:#241A45">
     <div style="display:flex;gap:8px">
       <input id="recValor" type="text" inputmode="decimal" placeholder="Valor R$" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;color:#241A45">
-      <select id="recMes" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;background:#fff;color:#241A45">${meses}</select>
+      ${recRecorrente
+        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.15);border-radius:10px;padding:11px;font-size:13px;font-weight:700;color:#CFF3E6">todo mês</div>`
+        : `<select id="recMes" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;background:#fff;color:#241A45">${meses}</select>`}
     </div>
     <button class="btnP" style="width:100%;margin-top:10px;background:var(--ggreen);color:#063" onclick="_g.addReceita()">adicionar receita</button>
-    ${(state.receitas||[]).length?`<div style="margin-top:12px">${state.receitas.map(r=>{const d=new Date(now.getFullYear(),now.getMonth()+(+r.mesIdx||0),1);return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.12)"><span style="font-size:13px">${r.nome} <span style="color:#7DE8D2;font-size:11px">${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}</span></span><span style="display:flex;align-items:center;gap:10px"><b style="color:var(--ggreen)">+${fmt(r.valor)}</b><button onclick="_g.delReceita('${r.id}')" style="background:none;border:none;color:var(--gpink);font-size:12px;font-weight:700">excluir</button></span></div>`;}).join("")}</div>`:""}
+    ${(state.receitas||[]).length?`<div style="margin-top:12px">${state.receitas.map(r=>{
+        const quando = r.recorrente ? "todo mês" : (()=>{ const d=new Date(now.getFullYear(),now.getMonth()+(+r.mesIdx||0),1); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; })();
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.12)"><span style="font-size:13px">${r.recorrente?'🔁 ':''}${r.nome} <span style="color:#7DE8D2;font-size:11px">${quando}</span></span><span style="display:flex;align-items:center;gap:10px"><b style="color:var(--ggreen)">+${fmtV(r.valor)}</b><button onclick="_g.delReceita('${r.id}')" style="background:none;border:none;color:var(--gpink);font-size:12px;font-weight:700">excluir</button></span></div>`;
+      }).join("")}</div>`:""}
   </div>`;
 }
+G.setRecRecorrente=(v)=>{ recRecorrente=!!v; render(); };
 G.addReceita=()=>{
   const nome=document.getElementById("recNome")?.value?.trim()||"Receita extra";
   const valor=parseMoeda(document.getElementById("recValor")?.value)||0;
-  const mesIdx=Number(document.getElementById("recMes")?.value)||0;
+  const mesIdx=recRecorrente?0:(Number(document.getElementById("recMes")?.value)||0);
   if(valor<=0){ status("Informe um valor para a receita.",true); return; }
   state.receitas=state.receitas||[];
-  state.receitas.push({id:"r"+Date.now(),nome,valor,mesIdx,cat:"Receita"});
+  state.receitas.push({id:"r"+Date.now(),nome,valor,mesIdx,recorrente:recRecorrente,cat:"Receita"});
   salvar(); render(); status("Receita adicionada ✓ — veja o impacto na Projeção.",false);
 };
 G.delReceita=id=>{ state.receitas=(state.receitas||[]).filter(r=>r.id!==id); salvar(); render(); };
