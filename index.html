@@ -1492,25 +1492,23 @@ G.chatEnviar=async()=>{
   chatMsgs.push(userMsg); appendChatBubble(userMsg);
   if(inp) inp.value="";
 
-  // --- 1) Intenção de LANÇAMENTO (despesa/receita) antes de tratar como pergunta ---
+  // --- 1) Intenção de LANÇAMENTO (despesa e/ou receita) — trata fala MISTA e
+  //        vários itens, classificando CADA trecho separadamente ---
   const low=q.toLowerCase();
   const ehPergunta = /\?\s*$/.test(q) || /^(quanto|quando|qual|quais|como|onde|por que|porque|o que|me mostra|mostre)\b/.test(low);
   const temNum = /\d/.test(q);
-  const intReceita = !ehPergunta && temNum && /\b(recebi|receita|entrou|ganhei|sal[aá]rio|freela|b[oô]nus|13[ºo]|reembolso|extra de|caiu|pix de)\b/.test(low);
-  const intDespesa = !ehPergunta && temNum && /\b(gastei|paguei|comprei|gasto de|despesa|parcel|parcelei|lanc|lançar|registrar?|adicionar?|assinatura|conta de|boleto)\b/.test(low);
-  if(intReceita){
-    const rs=receitasDoTexto(q);
-    if(rs.length){ propostaChat(rs.map(r=>({_receita:true, ...r}))); return; }
-  }
-  if(intDespesa){
+  const intReceita = RECEITA_KW.test(low);
+  const intDespesa = /\b(gastei|paguei|comprei|gasto de|despesa|parcel|parcelei|lanc|lançar|registrar?|adicionar?|assinatura|conta de|boleto)\b/.test(low);
+  const intLanc = !ehPergunta && temNum && (intReceita || intDespesa);
+  if(intLanc){
     setChatEstado("computing");
-    let itens=parseLocal(q);
+    let itens=lancamentosDoTexto(q);
     if(!itens.length && cfg.funcaoUrl){
       try{ const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({extrairTexto:q})}); const d=await r.json(); itens=extrairItensDaResposta(d); }catch{}
     }
     setChatEstado("idle");
     if(itens.length){ propostaChat(itens); return; }
-    // se não conseguiu extrair, segue para o fluxo de conversa normal
+    // se não extraiu nada, segue para conversa normal
   }
 
   // --- 2) Conversa / análise ---
@@ -1529,27 +1527,35 @@ G.chatEnviar=async()=>{
 // rótulo curto de mês a partir do offset (0 = este mês)
 function mesLabelIdx(i){ const d=new Date(); d.setMonth(d.getMonth()+(+i||0)); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; }
 // separa uma fala em VÁRIAS receitas (por ";", ",", " e ", "/", quebras de linha)
-function receitasDoTexto(t){
-  // protege faixas/parcelas e divide também por "/"
-  let s=t.replace(/(entre\s*\d[\d.,]*)\s*(e|a|até)\s*(\d[\d.,]*)/gi,"$1<E>$3");
-  const partes=s.split(/[;\n\/]+|,| e | também | tambem | mais /i).map(x=>x.replace(/<E>/g," e ").trim()).filter(Boolean);
+// separa uma fala em trechos (; , / "e" "também" "mais" quebras de linha),
+// protegendo faixas "entre X e Y" e parcelas "Nx de Y".
+function segmentarTudo(texto){
+  let t=String(texto||"").replace(/(entre\s*\d[\d.,]*)\s*(e|a|até)\s*(\d[\d.,]*)/gi,"$1<E>$3").replace(/(\d+\s*(?:x|vezes?))\s*(de)\s*(\d)/gi,"$1<DE>$3");
+  return t.split(/[;\n\/]+|,| e | também | tambem | mais /i).map(s=>s.replace(/<E>/g," e ").replace(/<DE>/g," de ").trim()).filter(Boolean);
+}
+// palavras que indicam RECEITA num trecho
+const RECEITA_KW=/\b(recebi|receita|entrou|ganhei|sal[aá]rio|freela|b[oô]nus|13[ºo]|reembolso|restitu|plr|aluguel\s+receb|caiu|pix de|extra de|recebimento)\b/i;
+// extrai UMA receita de um trecho (ou null)
+function receitaDeParte(parte){
+  const low=parte.toLowerCase();
+  const mval=low.match(/(\d[\d.,]+|\d+)/); if(!mval) return null;
+  const valor=num(mval[1]); if(valor<=0) return null;
+  let mesIdx=0, recorrente=false;
+  if(/\b(todo\s*m[êe]s|mensal|recorrente|todos os meses|por m[êe]s|fixo)\b/.test(low)) recorrente=true;
+  const mm=low.match(/\b(janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i);
+  if(mm){ const idx=mesParaIdx(mm[1].toLowerCase().replace("marco","março")); if(idx!=null) mesIdx=idx; }
+  let nome=limpaNome(parte).replace(/^\s*(recebi|ganhei|entrou|caiu|receita|pix|adicione?|acrescente?|incluir?|recebimento|referente a|de|do|da)\s*/i,"").trim();
+  if(!nome) nome="Receita extra";
+  return {nome, valor, mesIdx, recorrente};
+}
+function receitasDoTexto(t){ return segmentarTudo(t).map(receitaDeParte).filter(Boolean); }
+// classifica CADA trecho como receita ou despesa (permite fala mista e vários itens)
+function lancamentosDoTexto(q){
   const out=[];
-  for(const parte of partes){
-    const low=parte.toLowerCase();
-    const mval=low.match(/(\d[\d.,]+|\d+)/); if(!mval) continue;
-    const valor=num(mval[1]); if(valor<=0) continue;
-    let mesIdx=0, recorrente=false;
-    if(/\b(todo\s*m[êe]s|mensal|recorrente|todos os meses|por m[êe]s|fixo)\b/.test(low)) recorrente=true;
-    const mm=low.match(/\b(janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i);
-    if(mm){ const idx=mesParaIdx(mm[1].toLowerCase().replace("marco","março")); if(idx!=null) mesIdx=idx; }
-    let nome=limpaNome(parte).replace(/^\s*(recebi|ganhei|entrou|caiu|receita|pix|adicione?|acrescente?|incluir?|referente a|de|do|da)\s*/i,"").trim();
-    if(!nome) nome="Receita extra";
-    out.push({nome, valor, mesIdx, recorrente});
-  }
-  // fallback: nenhuma parte casou mas há um número na frase toda
-  if(!out.length){
-    const mv=t.toLowerCase().match(/(\d[\d.,]+|\d+)/);
-    if(mv){ const v=num(mv[1]); if(v>0) out.push({nome:"Receita extra", valor:v, mesIdx:0, recorrente:false}); }
+  for(const parte of segmentarTudo(q)){
+    if(!/\d/.test(parte)) continue;
+    if(RECEITA_KW.test(parte)){ const r=receitaDeParte(parte); if(r) out.push({_receita:true, ...r}); }
+    else { parseLocal(parte).forEach(d=>out.push(d)); }
   }
   return out;
 }
@@ -2406,6 +2412,41 @@ G.addReceita=()=>{
   salvar(); render(); status("Receita adicionada ✓ — veja o impacto na Projeção.",false);
 };
 G.delReceita=id=>{ state.receitas=(state.receitas||[]).filter(r=>r.id!==id); salvar(); render(); };
+
+// ---- Backup / restauração (rede de segurança contra perda de dados) ----
+G.exportarBackup=()=>{
+  try{
+    const dump={ _guava:"backup", versao:1, data:new Date().toISOString(), state };
+    const blob=new Blob([JSON.stringify(dump,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    const d=new Date(); const nome=`guava-backup-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}.json`;
+    a.href=url; a.download=nome; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },500);
+    status("Backup exportado ✓",false);
+  }catch(e){ alert("Não consegui exportar: "+(e.message||e)); }
+};
+G.importarBackup=(ev)=>{
+  const f=ev.target.files&&ev.target.files[0]; if(ev.target) ev.target.value=""; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const dump=JSON.parse(r.result);
+      const nov=dump && dump.state ? dump.state : dump; // aceita backup ou state cru
+      if(!nov || typeof nov!=="object" || !("itens" in nov || "receitas" in nov)) throw new Error("arquivo não parece um backup do Guava");
+      const nI=(nov.itens||[]).length, nR=(nov.receitas||[]).length, nO=(nov.objetivos||[]).length;
+      if(!confirm(`Importar este backup?\n\n• ${nI} despesas\n• ${nR} receitas\n• ${nO} objetivos\n\nOs dados atuais deste aparelho serão MESCLADOS com o backup (nada é apagado).`)) return;
+      // mescla por id para não perder nada do que já existe
+      state=mesclarEstados(state, nov);
+      // campos escalares úteis do backup (renda/nome/meta) só se ausentes localmente
+      if(nov.renda && !state.renda) state.renda=nov.renda;
+      if(nov.nome && !state.nome) state.nome=nov.nome;
+      salvar(); render();
+      status(`Backup importado ✓ (${nI} despesas, ${nR} receitas)`,false);
+    }catch(e){ alert("Não consegui importar: "+(e.message||e)); }
+  };
+  r.readAsText(f);
+};
 function ligarAdd(){
   const ib=document.getElementById("interpBtn");
   if(ib) ib.onclick=()=>{ const t=(document.getElementById("txtInp").value||"").trim(); if(t) interpretar({texto:t}); };
@@ -2800,6 +2841,16 @@ function viewConfig(){
            </div>
            <div style="font-size:10.5px;color:var(--mute);line-height:1.45;margin-top:8px">Google/Apple abrem uma página segura de login e voltam ao app. Para Apple, é preciso ter o provedor Apple habilitado no Firebase.</div>`}
       </div>`; })()}
+
+    <div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:6px">Backup dos seus dados</div>
+      <div style="font-size:12px;color:var(--mute);line-height:1.5;margin-bottom:10px">Salve um arquivo com todas as suas despesas, receitas e objetivos — e restaure quando quiser (inclusive em outro aparelho ou após recriar o atalho).</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="_g.exportarBackup()" style="flex:1;background:var(--nu);border:none;color:#fff;font-weight:700;font-size:13px;padding:11px;border-radius:11px">⬇️ Exportar backup</button>
+        <button onclick="document.getElementById('impBackup').click()" style="flex:1;background:none;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:13px;padding:11px;border-radius:11px">⬆️ Importar</button>
+      </div>
+      <input id="impBackup" type="file" accept="application/json,.json" style="display:none" onchange="_g.importarBackup(event)">
+    </div>
 
     <div class="card">
       <div style="font-weight:700;font-size:15px;margin-bottom:10px">Status da conexão</div>
