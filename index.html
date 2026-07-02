@@ -297,36 +297,64 @@ function exportarSerieCSV(){
 async function iniciarFirebase(){
   if(!cfg.firebase) return;
   try{
-    const [{initializeApp},{getFirestore,doc,getDoc,setDoc,onSnapshot},{getAuth,signInAnonymously,onAuthStateChanged}]=await Promise.all([
+    const [appMod,fsMod,authMod]=await Promise.all([
       import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"),
       import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"),
       import("https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"),
     ]);
+    const {initializeApp}=appMod;
+    const {getFirestore,doc,getDoc,setDoc,onSnapshot}=fsMod;
+    const {getAuth,onAuthStateChanged,signInAnonymously,setPersistence,browserLocalPersistence,
+      GoogleAuthProvider,OAuthProvider,signInWithRedirect,linkWithRedirect,getRedirectResult,
+      signInWithCredential,signInWithEmailAndPassword,createUserWithEmailAndPassword,
+      EmailAuthProvider,linkWithCredential,signOut}=authMod;
     fb.app=initializeApp(cfg.firebase);
     fb.db=getFirestore(fb.app);
     fb.auth=getAuth(fb.app);
     fb._api={doc,getDoc,setDoc,onSnapshot};
+    fb._authApi={GoogleAuthProvider,OAuthProvider,signInWithRedirect,linkWithRedirect,getRedirectResult,
+      signInWithCredential,signInWithEmailAndPassword,createUserWithEmailAndPassword,
+      EmailAuthProvider,linkWithCredential,signOut,signInAnonymously};
+    try{ await setPersistence(fb.auth,browserLocalPersistence); }catch{}
+    // conclui um login por redirect (Google/Apple) iniciado antes
+    try{
+      const res=await getRedirectResult(fb.auth);
+      if(res && res.user) status("Login concluído ✓",false);
+    }catch(e){
+      if(e && (e.code==="auth/credential-already-in-use"||e.code==="auth/account-exists-with-different-credential")){
+        // essa conta já existe (outro aparelho): entra nela e sinaliza mesclagem
+        const cred = (GoogleAuthProvider.credentialFromError&&GoogleAuthProvider.credentialFromError(e))
+                   || (OAuthProvider.credentialFromError&&OAuthProvider.credentialFromError(e));
+        if(cred){ fb._mesclarAoEntrar=true; try{ await signInWithCredential(fb.auth,cred); }catch(err){ banner("Não consegui entrar na conta: "+traduzErroAuth(err)); } }
+        else banner("Essa conta já existe. Entre com o mesmo método usado antes.");
+      } else if(e && e.code && e.code!=="auth/no-auth-event"){
+        banner("Login não concluído: "+traduzErroAuth(e));
+      }
+    }
     onAuthStateChanged(fb.auth,async(user)=>{
-      if(!user){ signInAnonymously(fb.auth).catch(e=>banner("Login Firebase falhou: "+e.message)); return; }
-      fb.uid=user.uid;
+      if(!user){ signInAnonymously(fb.auth).catch(e=>banner("Login Firebase falhou: "+traduzErroAuth(e))); return; }
+      fb.user=user; fb.uid=user.uid;
       fb.ref=doc(fb.db,"usuarios",user.uid);
       const snap=await getDoc(fb.ref);
-      if(snap.exists()){ state={...state,...snap.data()}; salvarLocal(); render(); }
-      else { await gravarFirebase(); }
+      if(snap.exists()){
+        if(fb._mesclarAoEntrar){ state=mesclarEstados(state,snap.data()); fb._mesclarAoEntrar=false; salvarLocal(); await gravarFirebase(); }
+        else { state={...state,...snap.data()}; salvarLocal(); }
+      } else {
+        // conta nova: leva os dados deste aparelho para ela
+        await gravarFirebase();
+      }
       if(fb.unsub) fb.unsub();
-      // PATCH: ignora o "eco" de escritas locais pendentes (metadata.hasPendingWrites)
-      // E TAMBÉM o eco já confirmado pelo servidor (que antes disparava um render()
-      // no meio da digitação, tirando o foco do campo). Além disso, nunca re-renderiza
-      // enquanto o usuário está com um campo em edição — a atualização remota fica
-      // pendente e é aplicada assim que o foco sai do campo.
+      // ignora o "eco" de escritas locais pendentes e o eco já confirmado pelo
+      // servidor; nunca re-renderiza com um campo em edição (protege o foco).
       fb.unsub=onSnapshot(fb.ref,{includeMetadataChanges:true},d=>{
         if(d.metadata && d.metadata.hasPendingWrites) return;
         if(!d.exists()) return;
         const inc=JSON.stringify(d.data());
-        if(inc===fb.lastWrite){ state={...state,...d.data()}; salvarLocal(); return; } // nosso próprio eco: aplica sem redesenhar
-        if(usuarioEditando()){ fb._pendente=d.data(); return; }                       // não destrói o campo em foco
+        if(inc===fb.lastWrite){ state={...state,...d.data()}; salvarLocal(); return; }
+        if(usuarioEditando()){ fb._pendente=d.data(); return; }
         state={...state,...d.data()}; salvarLocal(); render();
       });
+      render(); // reflete o estado de login no cabeçalho e em Configurar
     });
   }catch(e){ banner("Não consegui iniciar o Firebase. Verifique a configuração em ⚙️."); }
 }
@@ -339,6 +367,80 @@ async function gravarFirebase(){
 }
 // verdadeiro enquanto o usuário digita/seleciona em um campo (protege o foco)
 function usuarioEditando(){ const a=document.activeElement; return !!a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName); }
+
+// ---------- Login real (Google / Apple / e-mail) ----------
+// Mescla dados do aparelho com os da conta (união por id dos itens/receitas/objetivos;
+// escalares vindos da conta prevalecem). Evita perder lançamentos ao entrar numa conta.
+function mesclarEstados(local, remoto){
+  local=local||{}; remoto=remoto||{};
+  const base={...local, ...remoto};
+  const uni=(a,b)=>{ const arr=Array.isArray(b)?b.slice():[]; const ids=new Set(arr.map(x=>x&&x.id));
+    (Array.isArray(a)?a:[]).forEach(x=>{ if(x&&!ids.has(x.id)) arr.push(x); }); return arr; };
+  base.itens=uni(local.itens, remoto.itens);
+  base.receitas=uni(local.receitas, remoto.receitas);
+  base.objetivos=uni(local.objetivos, remoto.objetivos);
+  return base;
+}
+function traduzErroAuth(e){
+  const c=(e&&e.code)||"";
+  const M={
+    "auth/invalid-email":"E-mail inválido.",
+    "auth/missing-password":"Digite a senha.",
+    "auth/weak-password":"Senha fraca (mínimo 6 caracteres).",
+    "auth/email-already-in-use":"Já existe conta com esse e-mail. Use \"Entrar\".",
+    "auth/invalid-credential":"E-mail ou senha incorretos.",
+    "auth/wrong-password":"Senha incorreta.",
+    "auth/user-not-found":"Não encontrei conta com esse e-mail.",
+    "auth/popup-blocked":"O navegador bloqueou a janela. Tente novamente.",
+    "auth/operation-not-allowed":"Método de login não habilitado no Firebase (Authentication → Sign-in method).",
+    "auth/unauthorized-domain":"Domínio não autorizado (Firebase → Authentication → Settings → Authorized domains).",
+    "auth/network-request-failed":"Sem conexão. Verifique a internet.",
+  };
+  return M[c] || (e&&e.message) || "Erro de autenticação.";
+}
+async function _loginProvedor(kind){
+  if(!fb.auth||!fb._authApi){ alert("Ative e configure o Firebase primeiro em ⚙️ Configurar."); return; }
+  const A=fb._authApi; let provider;
+  if(kind==="google") provider=new A.GoogleAuthProvider();
+  else { provider=new A.OAuthProvider("apple.com"); provider.addScope("email"); provider.addScope("name"); }
+  try{
+    const cur=fb.auth.currentUser;
+    if(cur && cur.isAnonymous) await A.linkWithRedirect(cur, provider); // migra dados do anônimo
+    else await A.signInWithRedirect(fb.auth, provider);
+  }catch(e){ banner("Não consegui iniciar o login: "+traduzErroAuth(e)); }
+}
+async function _emailAuth(criar){
+  if(!fb.auth||!fb._authApi){ alert("Ative e configure o Firebase primeiro em ⚙️ Configurar."); return; }
+  const A=fb._authApi;
+  const email=(prompt("Seu e-mail:")||"").trim(); if(!email) return;
+  const senha=prompt(criar?"Crie uma senha (mínimo 6 caracteres):":"Sua senha:"); if(!senha) return;
+  try{
+    const cur=fb.auth.currentUser;
+    if(criar){
+      if(cur && cur.isAnonymous){ const cred=A.EmailAuthProvider.credential(email,senha); await A.linkWithCredential(cur,cred); }
+      else await A.createUserWithEmailAndPassword(fb.auth,email,senha);
+    } else {
+      if(cur && cur.isAnonymous) fb._mesclarAoEntrar=true; // traz os dados deste aparelho
+      await A.signInWithEmailAndPassword(fb.auth,email,senha);
+    }
+    render();
+  }catch(e){ alert("Não deu certo: "+traduzErroAuth(e)); }
+}
+async function _sairConta(){
+  if(!fb.auth||!fb._authApi) return;
+  if(!confirm("Sair da conta? Seus dados continuam salvos neste aparelho.")) return;
+  try{ await fb._authApi.signOut(fb.auth); }catch{}
+  // onAuthStateChanged fará login anônimo automático em seguida
+}
+function contaResumo(){
+  const u=fb.user;
+  if(!u) return {tipo:"local", icone:"📱", txt:"Somente neste aparelho"};
+  if(u.isAnonymous) return {tipo:"anon", icone:"☁️", txt:"Backup na nuvem (sem login) — não sincroniza entre aparelhos"};
+  const prov=(u.providerData&&u.providerData[0]&&u.providerData[0].providerId)||"";
+  const nome = prov.indexOf("google")>=0?"Google":prov.indexOf("apple")>=0?"Apple":"E-mail";
+  return {tipo:"real", icone:"✅", txt:`Conectado via ${nome}${u.email?" · "+u.email:""}`};
+}
+
 let bannerMsg="";
 function banner(m){ bannerMsg=m; const el=document.getElementById("bannerSlot"); if(el) el.innerHTML=m?`<div class="banner">${m}</div>`:""; }
 
@@ -711,6 +813,12 @@ function fecharMes(){
 const app=document.getElementById("app");
 const G={};
 window._g=G;
+// handlers de login (definidos após a criação de G para evitar TDZ)
+G.loginGoogle=()=>_loginProvedor("google");
+G.loginApple =()=>_loginProvedor("apple");
+G.criarContaEmail=()=>_emailAuth(true);
+G.entrarEmail=()=>_emailAuth(false);
+G.sairConta=()=>_sairConta();
 G.setTab=t=>{ tab=t; modoAdd="texto"; render(); window.scrollTo(0,0); };
 G.setHor=h=>{ state.horizonte=h; salvar(); render(); window.scrollTo(0,0); };
 G.setMeta=x=>{ state.metaPct=x; salvar(); render(); };
@@ -1247,11 +1355,12 @@ G.abrirChat=()=>{
     const esc=calcularEscore(projecao(),state.renda,state.metaPct);
     const nm=primeiroNome(state.nome);
     const ola = nm ? `Olá, <b>${nm}</b>!` : "Olá!";
-    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Como posso ajudar hoje?`}];
+    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Posso <b>lançar despesas e receitas</b> — é só me dizer <i>"gastei 60,67 no mercado"</i> ou <i>"recebi 500 de freela"</i> — ou enviar uma <b>foto/PDF</b> 📎. Também respondo dúvidas e faço sugestões.`}];
   }
   document.body.insertAdjacentHTML("beforeend", renderChat());
   document.body.style.overflow="hidden";
   ligarChatMic();
+  const cf=document.getElementById("chatFile"); if(cf) cf.onchange=onChatArquivo;
 };
 G.fecharChat=()=>{
   chatAberto=false; document.body.style.overflow="";
@@ -1283,7 +1392,9 @@ function renderChat(){
     </div>
     ${chatMsgs.length<=1?`<div id="chatSugestoes" style="padding:0 12px 8px;display:flex;gap:7px;overflow-x:auto">${sugestoes.map(([t,q])=>`<button onclick="_g.chatRapida('${q}')" style="white-space:nowrap;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 13px;border-radius:20px">${t}</button>`).join("")}</div>`:""}
     <div id="chatBar" style="padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:rgba(8,36,28,.6);backdrop-filter:blur(10px)">
-      <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'digite ou toque no microfone…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:22px;padding:13px 16px;font-size:14px;background:rgba(255,255,255,.95);color:var(--ink)">
+      <button id="chatFileBtn" ${temIA?'':'disabled'} aria-label="Enviar foto ou PDF" onclick="document.getElementById('chatFile').click()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">📎</button>
+      <input id="chatFile" type="file" accept="image/*,application/pdf" style="display:none">
+      <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'lançar, perguntar ou 📎 foto/PDF…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:22px;padding:13px 16px;font-size:14px;background:rgba(255,255,255,.95);color:var(--ink)">
       <button id="chatMic" class="micBtn" ${temIA?'':'disabled'} aria-label="Toque para gravar" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:19px;flex:none;${temIA?'':'opacity:.4'}">🎙️</button>
       <button id="chatSend" onclick="_g.chatEnviar()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">▸</button>
     </div>
@@ -1327,7 +1438,37 @@ G.chatEnviar=async()=>{
   const userMsg={de:"user", html:q.replace(/</g,"&lt;")};
   chatMsgs.push(userMsg); appendChatBubble(userMsg);
   if(inp) inp.value="";
-  if(!cfg.funcaoUrl){ const m={de:"ia", html:"Para conversar livremente, ative a IA em ⚙️ Configurar. Enquanto isso, use os atalhos de análise rápida."}; chatMsgs.push(m); appendChatBubble(m); return; }
+
+  // --- 1) Intenção de LANÇAMENTO (despesa/receita) antes de tratar como pergunta ---
+  const low=q.toLowerCase();
+  const ehPergunta = /\?\s*$/.test(q) || /^(quanto|quando|qual|quais|como|onde|por que|porque|o que|me mostra|mostre)\b/.test(low);
+  const temNum = /\d/.test(q);
+  const intReceita = !ehPergunta && temNum && /\b(recebi|receita|entrou|ganhei|sal[aá]rio|freela|b[oô]nus|13[ºo]|reembolso|extra de|caiu|pix de)\b/.test(low);
+  const intDespesa = !ehPergunta && temNum && /\b(gastei|paguei|comprei|gasto de|despesa|parcel|parcelei|lanc|lançar|registrar?|adicionar?|assinatura|conta de|boleto)\b/.test(low);
+  if(intReceita){
+    const rc=receitaDoTexto(q);
+    if(rc.valor>0){
+      state.receitas=state.receitas||[];
+      state.receitas.push({id:"r"+Date.now(),nome:rc.nome,valor:rc.valor,mesIdx:rc.mesIdx,cat:"Receita"});
+      salvar();
+      const quando = rc.mesIdx? ` para ${MESES[(new Date().getMonth()+rc.mesIdx)%12]}` : " neste mês";
+      const m={de:"ia", html:`Registrei a receita <b>${rc.nome}</b> de <b>${fmtV(rc.valor)}</b>${quando}. 💚 Veja o efeito na aba Projeção.`};
+      chatMsgs.push(m); appendChatBubble(m); return;
+    }
+  }
+  if(intDespesa){
+    setChatEstado("computing");
+    let itens=parseLocal(q);
+    if(!itens.length && cfg.funcaoUrl){
+      try{ const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({extrairTexto:q})}); const d=await r.json(); itens=extrairItensDaResposta(d); }catch{}
+    }
+    setChatEstado("idle");
+    if(itens.length){ propostaChat(itens); return; }
+    // se não conseguiu extrair, segue para o fluxo de conversa normal
+  }
+
+  // --- 2) Conversa / análise ---
+  if(!cfg.funcaoUrl){ const m={de:"ia", html:"Para conversar livremente, ative a IA em ⚙️ Configurar. Enquanto isso, use os atalhos de análise rápida — ou me diga um gasto/receita que eu registro."}; chatMsgs.push(m); appendChatBubble(m); return; }
   setChatEstado("computing");
   try{
     const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
@@ -1338,6 +1479,64 @@ G.chatEnviar=async()=>{
   }catch(e){ const m={de:"ia", html:"Não consegui consultar a IA agora. Tente novamente em instantes."}; chatMsgs.push(m); appendChatBubble(m); }
   setChatEstado("idle");
 };
+// ---- GuavAI: ler foto/PDF e propor lançamentos, e registrar por texto ----
+function receitaDoTexto(t){
+  const low=t.toLowerCase();
+  const mval=low.match(/(\d[\d.,]*)/); const valor=mval?num(mval[1]):0;
+  let mesIdx=0; const mm=low.match(/\b(?:em|no|na)\s+([a-zç]+)/); if(mm){ const idx=mesParaIdx(mm[1]); if(idx!=null) mesIdx=idx; }
+  let nome=limpaNome(t);
+  nome=nome.replace(/^\s*(recebi|ganhei|entrou|caiu|receita|pix)\s*/i,"").trim();
+  return {valor, mesIdx, nome:nome||"Receita extra"};
+}
+let chatProposta=null;
+function propostaChat(itens){
+  chatProposta=itens.map(normaliza);
+  const linhas=chatProposta.map(it=>{
+    const v = it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>${it.nome} <span style="color:#8aa2ad;font-size:11px">·${NAT_LABEL[it.natureza].split(" ")[0]}</span></span><b>${fmtV(v)}</b></div>`;
+  }).join("");
+  const n=chatProposta.length;
+  const html=`Encontrei <b>${n}</b> ${n===1?'lançamento':'lançamentos'}:<div style="margin:6px 0 4px">${linhas}</div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button onclick="_g.chatIncluirProposta()" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:13px;padding:9px;border-radius:9px">incluir ${n===1?'':'tudo'}</button>
+      <button onclick="_g.chatDescartarProposta()" style="background:none;border:1px solid #cfd6dd;color:#8895a5;font-weight:700;font-size:13px;padding:9px 12px;border-radius:9px">descartar</button>
+    </div>
+    <div style="font-size:11px;color:#8895a5;margin-top:6px">Depois é só ajustar tipo/valor na aba Despesas.</div>`;
+  const m={de:"ia", html}; chatMsgs.push(m); appendChatBubble(m);
+}
+G.chatIncluirProposta=()=>{
+  if(!chatProposta||!chatProposta.length) return;
+  const n=chatProposta.length; chatProposta.forEach(it=>lancar(it)); chatProposta=null;
+  const m={de:"ia", html:`Pronto! Incluí ${n} ${n===1?'lançamento':'lançamentos'} nas suas despesas. ✅ Veja em Despesas ou na Projeção.`};
+  chatMsgs.push(m); appendChatBubble(m); salvar();
+};
+G.chatDescartarProposta=()=>{
+  chatProposta=null;
+  const m={de:"ia", html:"Ok, descartei. Se quiser, me mande de novo ou digite manualmente."};
+  chatMsgs.push(m); appendChatBubble(m);
+};
+async function onChatArquivo(e){
+  const file=e.target.files&&e.target.files[0]; if(e.target) e.target.value=""; if(!file) return;
+  if(!cfg.funcaoUrl){ const m={de:"ia", html:"Para ler foto ou PDF, ative a IA em ⚙️ Configurar."}; chatMsgs.push(m); appendChatBubble(m); return; }
+  if(file.size>8*1024*1024){ const m={de:"ia", html:"Esse arquivo é grande demais (máx. 8MB). Tente uma foto com menos resolução."}; chatMsgs.push(m); appendChatBubble(m); return; }
+  const isPdf=file.type==="application/pdf";
+  const um={de:"user", html:`📎 ${isPdf?'PDF':'Foto'} enviado para leitura`}; chatMsgs.push(um); appendChatBubble(um);
+  setChatEstado("computing");
+  const r=new FileReader();
+  r.onload=async()=>{
+    const b64=(r.result+"").split(",")[1];
+    try{
+      const resp=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(isPdf?{pdfBase64:b64}:{imagemBase64:b64,imagemTipo:file.type||"image/jpeg"})});
+      const data=await resp.json();
+      const itens=extrairItensDaResposta(data);
+      setChatEstado("idle");
+      if(!itens.length){ const m={de:"ia", html:"Não identifiquei lançamentos nesse arquivo. Pode me dizer em texto? Ex.: <i>\"mercado 250; luz 180\"</i>."}; chatMsgs.push(m); appendChatBubble(m); return; }
+      propostaChat(itens);
+    }catch(err){ setChatEstado("idle"); const m={de:"ia", html:"Não consegui ler o arquivo agora. Tente novamente em instantes."}; chatMsgs.push(m); appendChatBubble(m); }
+  };
+  r.readAsDataURL(file);
+}
 G.chatRapida=(q)=>{
   // reaproveita o motor determinístico Analise para respostas rápidas dentro do chat
   const rotulos={cat:"Gastos por categoria",alim3:"Alimentação nos próximos 3 meses",parc:"Quando as parcelas aliviam",antec:"Antecipar parcelas"};
@@ -2452,6 +2651,29 @@ function viewSaiba(){
       </div>
     </div>
 
+    <!-- 7. Segurança e sigilo -->
+    <div class="card">
+      <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">7 · SEGURANÇA E SIGILO</div>
+      <div style="font-size:12.5px;color:var(--mute);line-height:1.55;margin:8px 0 12px">
+        Suas informações financeiras são tratadas com cuidado. Em resumo: <b>seus dados são seus</b>, não são vendidos nem usados para anúncios.
+      </div>
+      ${[
+        ["🔒","Onde ficam seus dados","Por padrão, tudo fica salvo <b>só neste aparelho</b> (armazenamento local do navegador). A nuvem só entra em ação se você ativar a sincronização."],
+        ["👤","Login e conta","O acesso usa o <b>Firebase Authentication</b> (Google, Apple ou e-mail). O app <b>não guarda sua senha</b> — quem cuida disso é o provedor de login. Cada conta só enxerga os próprios dados."],
+        ["🛡️","Isolamento por usuário","Na nuvem, uma <b>regra de segurança</b> garante que cada pessoa só lê e grava o seu próprio documento — ninguém acessa os dados de outro usuário."],
+        ["🔐","Transporte protegido","Toda a comunicação com a nuvem e com a IA acontece por <b>HTTPS</b> (conexão criptografada)."],
+        ["🤖","IA e seus dados","Ao usar o GuavAI, o texto/foto/PDF é enviado a uma função no servidor que consulta a IA apenas para responder ou extrair os lançamentos. A <b>chave da IA fica no servidor</b>, nunca no app. O áudio do microfone é transcrito <b>no próprio aparelho</b> — o som não sobe para a nuvem."],
+        ["🗑️","Seus direitos (LGPD)","Você pode <b>exportar</b> ou <b>apagar</b> seus dados a qualquer momento em ⚙️ Configurar. Dados excluídos saem do aparelho; se estiver logado, também da sua conta na nuvem."],
+        ["🚫","Sem anúncios, sem venda","O Guava <b>não exibe anúncios</b> e <b>não vende ou compartilha</b> seus dados financeiros com terceiros para fins de marketing."],
+      ].map(([ic,t,d])=>`<div style="display:flex;gap:11px;align-items:flex-start;margin-bottom:11px">
+        <div style="width:30px;height:30px;border-radius:9px;background:var(--greenSoft);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none">${ic}</div>
+        <div><div style="font-weight:700;font-size:13.5px">${t}</div><div style="font-size:12px;color:var(--mute);line-height:1.5;margin-top:2px">${d}</div></div>
+      </div>`).join("")}
+      <div style="font-size:11px;color:var(--mute);line-height:1.5;border-top:1px solid var(--line);padding-top:10px;margin-top:4px">
+        Boas práticas recomendadas: use a <b>trava de tela</b> do seu aparelho, mantenha o app atualizado e prefira <b>login real</b> (Google/Apple) para backup seguro e sincronização entre seus dispositivos.
+      </div>
+    </div>
+
     <div style="text-align:center;padding:4px 0 8px">
       <button class="btnP" style="width:100%" onclick="_g.setTab('config')">⚙️ Ir para Configurar</button>
     </div>
@@ -2472,6 +2694,27 @@ function viewConfig(){
       </label>
       <div style="font-size:11px;color:var(--mute);line-height:1.5;margin-top:2px">Usado só na saudação e nas conversas com o GuavAI. Fica salvo neste aparelho (ou na sua conta, se a sincronização estiver ligada).</div>
     </div>
+
+    ${(function(){ const c=contaResumo(); const logado=c.tipo==="real";
+      return `<div class="card">
+      <div style="font-weight:700;font-size:15px;margin-bottom:6px">Sua conta & sincronização</div>
+      <div style="display:flex;align-items:center;gap:8px;background:${logado?'var(--greenSoft)':'#F4F0FA'};border:1px solid ${logado?'#BFE0D2':'var(--line)'};border-radius:11px;padding:11px 12px;margin-bottom:10px">
+        <span style="font-size:18px">${c.icone}</span>
+        <span style="font-size:12.5px;color:var(--ink);font-weight:600;line-height:1.35">${c.txt}</span>
+      </div>
+      ${logado
+        ? `<button class="btnG" style="width:100%" onclick="_g.sairConta()">sair da conta</button>`
+        : `<div style="font-size:12px;color:var(--mute);line-height:1.5;margin-bottom:10px">Entre para <b>sincronizar entre iPhone e Mac</b> e ter backup seguro na sua conta. Os dados deste aparelho são migrados ao entrar.</div>
+           <div style="display:flex;flex-direction:column;gap:8px">
+             <button onclick="_g.loginGoogle()" style="width:100%;background:#fff;border:1.5px solid var(--line);color:#222;font-weight:700;font-size:14px;padding:12px;border-radius:11px">Entrar com Google</button>
+             <button onclick="_g.loginApple()" style="width:100%;background:#000;border:none;color:#fff;font-weight:700;font-size:14px;padding:12px;border-radius:11px"> Entrar com Apple</button>
+             <div style="display:flex;gap:8px">
+               <button onclick="_g.entrarEmail()" style="flex:1;background:var(--nu);border:none;color:#fff;font-weight:700;font-size:13px;padding:11px;border-radius:11px">Entrar (e-mail)</button>
+               <button onclick="_g.criarContaEmail()" style="flex:1;background:none;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:13px;padding:11px;border-radius:11px">Criar conta</button>
+             </div>
+           </div>
+           <div style="font-size:10.5px;color:var(--mute);line-height:1.45;margin-top:8px">Google/Apple abrem uma página segura de login e voltam ao app. Para Apple, é preciso ter o provedor Apple habilitado no Firebase.</div>`}
+      </div>`; })()}
 
     <div class="card">
       <div style="font-weight:700;font-size:15px;margin-bottom:10px">Status da conexão</div>
