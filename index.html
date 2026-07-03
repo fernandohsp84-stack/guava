@@ -1493,14 +1493,25 @@ G.chatEnviar=async()=>{
   const userMsg={de:"user", html:q.replace(/</g,"&lt;")};
   chatMsgs.push(userMsg); appendChatBubble(userMsg);
   if(inp) inp.value="";
+  const low=q.toLowerCase();
+
+  // --- 0) "Você incluiu?" / "impactou no fluxo?" — responde pela realidade do app ---
+  if(/\b(voc[êe]\s+incluiu|incluiu a despesa|foi inclu[íi]d|foi registrad|voc[êe]\s+registrou|impactou\s+(?:no|o)?\s*fluxo|entrou no fluxo|adicionou\s+(?:a\s+)?despesa|j[áa]\s+(?:est[áa]|foi)\s+(?:inclu|registrad)|chegou a incluir|realmente incluiu)\b/i.test(low)){
+    const html = (ultimosLancamentos && ultimosLancamentos.length)
+      ? `Sim! Nesta conversa eu já registrei:<div style="margin:8px 0;line-height:1.7">${ultimosLancamentos.map(t=>`• ${t}`).join("<br>")}</div>Já está tudo em <b>Despesas</b> e refletido na <b>Projeção</b> e no gráfico.<div style="display:flex;gap:8px;margin-top:8px"><button onclick="_g.irParaDe('despesas')" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver em Despesas</button><button onclick="_g.irParaDe('proj')" style="flex:1;background:#fff;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver na Projeção</button></div>`
+      : `Ainda <b>não</b> registrei nada nesta conversa. 😊 Me diga o gasto — por exemplo <i>“farmácia 190,32 em 2x”</i> ou <i>“mercado 450”</i> — que eu mostro uma prévia e, ao confirmar, incluo de verdade (impactando Despesas, Projeção e o gráfico).`;
+    const m={de:"ia", html}; chatMsgs.push(m); appendChatBubble(m); return;
+  }
 
   // --- 1) Intenção de LANÇAMENTO (despesa e/ou receita) — trata fala MISTA e
   //        vários itens, classificando CADA trecho separadamente ---
-  const low=q.toLowerCase();
   const ehPergunta = /\?\s*$/.test(q) || /^(quanto|quando|qual|quais|como|onde|por que|porque|o que|me mostra|mostre)\b/.test(low);
   const temNum = /\d/.test(q);
   const intReceita = RECEITA_KW.test(low);
-  const intDespesa = /\b(gastei|paguei|comprei|gasto de|despesa|parcel|parcelei|lanc|lançar|registrar?|adicionar?|assinatura|conta de|boleto)\b/.test(low);
+  const temParcela = /\b\d+\s*(?:x|vezes)\b/i.test(low) || /parcel/i.test(low);
+  const verbosDespesa = /\b(gastei|paguei|paguei|comprei|gasto de|despesa|lanc|lançar|registr|adicion|assinatura|conta de|boleto|fatura|mensalidade)\b/i.test(low);
+  const catHint = /\b(farm[áa]cia|rem[ée]dio|drogaria|mercado|supermercado|feira|padaria|luz|energia|[áa]gua|aluguel|condom[íi]nio|internet|telefone|celular|uber|99|táxi|taxi|gasolina|combust[íi]vel|posto|restaurante|lanche|ifood|escola|faculdade|curso|academia|sal[ãa]o|barbeiro|seguro|plano de sa[úu]de|consulta|dentista|m[ée]dico|netflix|spotify|streaming|cart[ãa]o|fatura|shopping|roupa|loja)\b/i.test(low);
+  const intDespesa = verbosDespesa || temParcela || (temNum && catHint);
   const intLanc = !ehPergunta && temNum && (intReceita || intDespesa);
   if(intLanc){
     setChatEstado("computing");
@@ -1606,6 +1617,7 @@ function lancamentosDoTexto(q){
   return out;
 }
 let chatProposta=null;
+let ultimosLancamentos=[]; // resumo do que foi incluído nesta conversa (p/ "você incluiu?")
 function propostaChat(itens){
   // aceita despesas (com natureza) e receitas (com _receita)
   chatProposta = itens.map(it=> it._receita ? it : normaliza(it));
@@ -1635,12 +1647,14 @@ G.chatIncluirProposta=()=>{
       state.receitas.push({id:"r"+Date.now()+"_"+k,nome:it.nome,valor:it.valor,mesIdx:it.recorrente?0:(+it.mesIdx||0),recorrente:!!it.recorrente,cat:"Receita"});
       nr++;
       linhas.push(`💰 <b>${it.nome}</b> +${fmtV(it.valor)} <span style="color:#8895a5">→ receita ${it.recorrente?'(todo mês)':mesLabelIdx(it.mesIdx)}</span>`);
+      ultimosLancamentos.push(`${it.nome} — +${fmtV(it.valor)} (receita ${it.recorrente?'todo mês':mesLabelIdx(it.mesIdx)})`);
     } else {
       const nome=it.nome, nat=it.natureza||"eventual";
       const v = nat==="estimada"?provavel(it):(+it.valor||0);
       const det = nat==="parcela" ? `parcela · ${(+it.restam||1)}x` : (NAT_LABEL[nat]||"despesa").split(" ")[0].toLowerCase();
       lancar(it); nd++;
       linhas.push(`🧾 <b>${nome}</b> ${fmtV(v)} <span style="color:#8895a5">→ Despesas · ${det}</span>`);
+      ultimosLancamentos.push(`${nome} — ${fmtV(v)} (${det})`);
     }
   });
   chatProposta=null;
@@ -2602,10 +2616,18 @@ function parseLocal(texto){
   for(const parte of partes){
     const low=parte.toLowerCase();
     let m;
-    // parcelamento: "8x de 300" / "10x 280" / "parcelei em 8 vezes de 300"
+    // parcelamento "Nx de VALOR": "8x de 300" / "10x 280" (valor É por parcela)
     if((m=low.match(/(\d+)\s*(?:x|vezes?)\s*(?:de\s*)?(\d[\d.,]*)/))){
       const restam=parseInt(m[1],10), valor=num(m[2]);
       out.push({nome:limpaNome(parte)||"Parcelamento",cat:catGuess(low),natureza:"parcela",valor,restam,total:valor*restam});
+      continue;
+    }
+    // parcelamento "VALOR em Nx": "190,32 em 2x" / "300 parcelado em 3 vezes"
+    // (valor É o TOTAL; divide pelas parcelas)
+    if((m=low.match(/(\d[\d.,]*)\s*(?:reais)?\s*(?:em|parcelad[oa]?(?:\s*em)?|divididos?\s*em)\s*(\d+)\s*(?:x|vezes?)/))){
+      const total=num(m[1]), restam=parseInt(m[2],10)||1;
+      const valor=Math.round((total/Math.max(restam,1))*100)/100;
+      out.push({nome:limpaNome(parte)||"Parcelamento",cat:catGuess(low),natureza:"parcela",valor,restam,total});
       continue;
     }
     // estimada: "entre 300 e 500" / "de 300 a 500"
