@@ -516,8 +516,10 @@ const Analise={
       renda:state.renda, metaPct:state.metaPct, horizonte:state.horizonte,
       gastoMesAtual:p[0].total, saldoMesAtual:p[0].sobra,
       porCategoria:cat,
-      projecao:p.map(x=>({mes:x.mes+"/"+x.ano, gasto:Math.round(x.total), saldo:Math.round(x.sobra), parcelas:Math.round(x.parcela)})),
+      projecao:p.map(x=>({mes:x.mes+"/"+x.ano, gasto:Math.round(x.total), saldo:Math.round(x.sobra), parcelas:Math.round(x.parcela), receitaExtra:Math.round(x.extra||0)})),
       parcelamentos:state.itens.filter(i=>i.natureza==="parcela").map(i=>({nome:i.nome,valor:i.valor,faltam:i.restam,cat:i.cat})),
+      receitasExtras:(state.receitas||[]).map(r=>({nome:r.nome,valor:r.valor,recorrente:!!r.recorrente,mes:r.recorrente?"todo mês":mesLabelIdx(r.mesIdx)})),
+      guiaNavegacao:"Abas do app: Início (visão geral e escore de Comportamento no círculo do gráfico); Projeção (saldo e composição mês a mês); Despesas (todos os lançamentos; filtro 'Todas' mostra inclusive parcelas, que exibem 'faltam Nx'); Metas (metas de poupança e objetivos como viagem/carro); '+ Adicionar' (incluir despesa ou receita; a lista de receitas fica abaixo do formulário); Saiba+ (ajuda e ⚙️ Configurar, onde ficam conta/login, backup exportar/importar). Lançamentos feitos pelo GuavAI de despesa vão para a aba Despesas; receitas vão para '+ Adicionar' e afetam Projeção e o gráfico da tela inicial.",
     };
   }
 };
@@ -1511,6 +1513,10 @@ G.chatEnviar=async()=>{
     // se não extraiu nada, segue para conversa normal
   }
 
+  // --- 1.5) Dúvidas de LOCALIZAÇÃO/USO do app (onde está, como encontro, foi parar) ---
+  const aj=respostaAjuda(q);
+  if(aj){ const m={de:"ia", html:aj}; chatMsgs.push(m); appendChatBubble(m); return; }
+
   // --- 2) Conversa / análise ---
   if(!cfg.funcaoUrl){ const m={de:"ia", html:"Para conversar livremente, ative a IA em ⚙️ Configurar. Enquanto isso, use os atalhos de análise rápida — ou me diga um gasto/receita que eu registro."}; chatMsgs.push(m); appendChatBubble(m); return; }
   setChatEstado("computing");
@@ -1526,6 +1532,46 @@ G.chatEnviar=async()=>{
 // ---- GuavAI: ler foto/PDF e propor lançamentos, e registrar por texto ----
 // rótulo curto de mês a partir do offset (0 = este mês)
 function mesLabelIdx(i){ const d=new Date(); d.setMonth(d.getMonth()+(+i||0)); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; }
+// Responde dúvidas de navegação/uso do app (onde está, como encontro, foi parar).
+// Funciona offline (sem a IA de nuvem). Retorna HTML ou null.
+function respostaAjuda(q){
+  const s=q.toLowerCase();
+  const ehAjuda=/\b(cad[êe]|foi parar|sumiu|sumiram|desapareceu|n[ãa]o (?:acho|achei|encontro|encontrei|vejo|consigo (?:achar|ver|encontrar)))\b/i.test(s)
+    || /\b(em que aba|qual aba|onde (?:fica|ficam|encontro|acho|vejo|est[áã]|est[ãa]o|aparece|adiciono|lan[çc]o|salv))\b/i.test(s)
+    || /\bcomo (?:acho|encontro|vejo|localizo|adiciono|lan[çc]o|exporto|importo|fa[çc]o (?:backup|login|para (?:ver|achar|adicionar)))\b/i.test(s);
+  if(!ehAjuda) return null;
+  const tem=(...ks)=>ks.some(k=>s.includes(k));
+  const blocos=[];
+  if(tem("parcel"))
+    blocos.push(["💳 Parcelas","Ficam na aba <b>Despesas</b>. Toque no filtro <b>Todas</b> (ou <b>Parcela</b>) no topo. Cada parcela mostra <i>“faltam Nx”</i> e o botão <i>“paguei esta parcela”</i>."]);
+  else if(tem("despesa","gasto","gastei","compra","comprei","farm","mercado","conta","boleto","cartão","cartao"))
+    blocos.push(["🧾 Despesas","Ficam na aba <b>Despesas</b> (barra inferior). Use o filtro <b>Todas</b> para ver todas as naturezas — inclusive as recém-incluídas pelo GuavAI."]);
+  if(tem("receita","renda extra","plr","13","bônus","bonus","reembolso","aluguel","salário extra","salario extra"))
+    blocos.push(["💰 Receitas","A lista fica na aba <b>➕ Adicionar</b>, abaixo do formulário de receita. O efeito no saldo aparece na <b>Projeção</b> e no gráfico da tela inicial (ponto dourado no mês)."]);
+  if(tem("proje","futuro","meses","fluxo"))
+    blocos.push(["📈 Projeção","Aba <b>Projeção</b>: saldo e composição mês a mês. O gráfico da tela inicial resume 12/18 meses."]);
+  if(tem("meta","objetivo","viagem","carro","poupan"))
+    blocos.push(["🎯 Metas","Aba <b>Metas</b>: quanto guardar por mês e seus objetivos (viagem, carro...) com progresso."]);
+  if(tem("escore","comportamento","saúde","saude","pontu"))
+    blocos.push(["⭐ Escore","O escore de <b>Comportamento</b> fica no círculo central do gráfico (tela inicial). Detalhes na <b>Projeção</b>."]);
+  if(tem("backup","exportar","importar","perdi","sumiram","dados","restaur"))
+    blocos.push(["💾 Backup","Em <b>Saiba+ → ⚙️ Configurar</b> há <b>Exportar/Importar backup</b> dos seus dados."]);
+  if(tem("login","conta","sincron","entrar","google","apple"))
+    blocos.push(["👤 Conta","Em <b>⚙️ Configurar → Sua conta</b> você entra com Google/Apple/e-mail e sincroniza entre aparelhos."]);
+  if(!blocos.length)
+    blocos.push(["🧭 Mapa do app","<b>Início</b>: visão geral e escore · <b>Projeção</b>: mês a mês · <b>Despesas</b>: seus lançamentos · <b>Metas</b>: metas e objetivos · <b>➕ Adicionar</b>: incluir · <b>Saiba+</b>: ajuda e ⚙️ Configurar."]);
+  const html=blocos.map(([t,d])=>`<div style="margin-bottom:8px"><b>${t}</b><br><span style="color:#556;font-size:13px">${d}</span></div>`).join("");
+  const goDesp=tem("parcel","despesa","gasto","gastei","compra","comprei","farm","mercado","conta","boleto","cartão","cartao");
+  const goProj=tem("receita","proje","futuro","fluxo","escore","comportamento");
+  let btns="";
+  if(goDesp||goProj){
+    btns=`<div style="display:flex;gap:8px;margin-top:4px">
+      ${goDesp?`<button onclick="_g.irParaDe('despesas')" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Abrir Despesas</button>`:''}
+      ${goProj?`<button onclick="_g.irParaDe('proj')" style="flex:1;background:#fff;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Abrir Projeção</button>`:''}
+    </div>`;
+  }
+  return html+btns;
+}
 // separa uma fala em VÁRIAS receitas (por ";", ",", " e ", "/", quebras de linha)
 // separa uma fala em trechos (; , / "e" "também" "mais" quebras de linha),
 // protegendo faixas "entre X e Y" e parcelas "Nx de Y".
@@ -1582,16 +1628,32 @@ function propostaChat(itens){
 }
 G.chatIncluirProposta=()=>{
   if(!chatProposta||!chatProposta.length) return;
-  let nd=0,nr=0;
+  const linhas=[]; let nd=0,nr=0;
   chatProposta.forEach((it,k)=>{
-    if(it._receita){ state.receitas=state.receitas||[]; state.receitas.push({id:"r"+Date.now()+"_"+k,nome:it.nome,valor:it.valor,mesIdx:it.recorrente?0:(+it.mesIdx||0),recorrente:!!it.recorrente,cat:"Receita"}); nr++; }
-    else { lancar(it); nd++; }
+    if(it._receita){
+      state.receitas=state.receitas||[];
+      state.receitas.push({id:"r"+Date.now()+"_"+k,nome:it.nome,valor:it.valor,mesIdx:it.recorrente?0:(+it.mesIdx||0),recorrente:!!it.recorrente,cat:"Receita"});
+      nr++;
+      linhas.push(`💰 <b>${it.nome}</b> +${fmtV(it.valor)} <span style="color:#8895a5">→ receita ${it.recorrente?'(todo mês)':mesLabelIdx(it.mesIdx)}</span>`);
+    } else {
+      const nome=it.nome, nat=it.natureza||"eventual";
+      const v = nat==="estimada"?provavel(it):(+it.valor||0);
+      const det = nat==="parcela" ? `parcela · ${(+it.restam||1)}x` : (NAT_LABEL[nat]||"despesa").split(" ")[0].toLowerCase();
+      lancar(it); nd++;
+      linhas.push(`🧾 <b>${nome}</b> ${fmtV(v)} <span style="color:#8895a5">→ Despesas · ${det}</span>`);
+    }
   });
   chatProposta=null;
-  const partes=[]; if(nd) partes.push(`${nd} ${nd===1?'despesa':'despesas'}`); if(nr) partes.push(`${nr} ${nr===1?'receita':'receitas'}`);
-  const m={de:"ia", html:`Pronto! Incluí ${partes.join(" e ")}. ✅ Veja o efeito no gráfico e na Projeção.`};
-  chatMsgs.push(m); appendChatBubble(m); salvar();
+  filtroDesp="todos";     // garante que os novos itens apareçam na lista de Despesas
+  salvar(); render();      // ATUALIZA o app por trás do chat (Despesas, Projeção e gráfico)
+  const botoes=`<div style="display:flex;gap:8px;margin-top:10px">
+    ${nd?`<button onclick="_g.irParaDe('despesas')" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver em Despesas</button>`:''}
+    ${(nr||nd)?`<button onclick="_g.irParaDe('proj')" style="flex:1;background:#fff;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver na Projeção</button>`:''}
+  </div>`;
+  const m={de:"ia", html:`Pronto! Incluí e já atualizei o app. Veja onde cada item entrou:<div style="margin:8px 0 2px;line-height:1.7">${linhas.join("<br>")}</div>${botoes}`};
+  chatMsgs.push(m); appendChatBubble(m);
 };
+G.irParaDe=(t)=>{ filtroDesp="todos"; G.fecharChat(); G.setTab(t); };
 G.chatDescartarProposta=()=>{
   chatProposta=null;
   const m={de:"ia", html:"Ok, descartei. Se quiser, me mande de novo ou digite manualmente."};
