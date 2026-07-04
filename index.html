@@ -1527,6 +1527,8 @@ G.chatEnviar=async()=>{
   }
 
   // --- 1.5) Dúvidas de LOCALIZAÇÃO/USO do app (onde está, como encontro, foi parar) ---
+  const fin=respostaFinanceira(q);
+  if(fin){ const m={de:"ia", html:fin}; chatMsgs.push(m); appendChatBubble(m); return; }
   const aj=respostaAjuda(q);
   if(aj){ const m={de:"ia", html:aj}; chatMsgs.push(m); appendChatBubble(m); return; }
 
@@ -1536,7 +1538,7 @@ G.chatEnviar=async()=>{
   mostrarDigitando();
   try{
     const dados=Analise.resumoParaIA();
-    dados.persona="Você é o GuavAI, o melhor amigo financeiro do usuário"+(state.nome?` (chame-o de ${primeiroNome(state.nome)})`:"")+". Responda SEMPRE em português do Brasil, tom caloroso, curto e direto (2-5 frases), sem jargão. Se houver déficit, acolha sem alarmar e sugira 1 ajuste concreto. Se houver sobra, celebre com moderação e sugira guardar. NUNCA afirme que registrou/incluiu lançamentos — quem registra é o app após confirmação do usuário na prévia; se pedirem para lançar algo, oriente: 'me diga o item e o valor que eu preparo a prévia para você confirmar'. Use o campo guiaNavegacao para orientar onde encontrar coisas no app.";
+    dados.persona="Você é o GuavAI, o melhor amigo financeiro do usuário"+(state.nome?` (chame-o de ${primeiroNome(state.nome)})`:"")+". Responda SEMPRE em português do Brasil, tom caloroso, curto e direto (2-5 frases), sem jargão. Se houver déficit, acolha sem alarmar e sugira 1 ajuste concreto. Se houver sobra, celebre com moderação e sugira guardar. NUNCA afirme que registrou/incluiu lançamentos — quem registra é o app após confirmação do usuário na prévia; se pedirem para lançar algo, oriente: 'me diga o item e o valor que eu preparo a prévia para você confirmar'. Use o campo guiaNavegacao para orientar onde encontrar coisas no app. Você domina matemática financeira: Tabela Price e SAC, juros compostos, CET, comparação e portabilidade de dívidas (rotativo > cheque especial > pessoal > consignado) e planejamento de poupança; ao responder sobre empréstimos/dívidas, faça as contas passo a passo com os números do usuário e recomende sempre comparar pelo CET.";
     const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({pergunta:q, dados})});
     const d=await r.json();
@@ -1557,6 +1559,64 @@ function removerDigitando(){ const el=document.getElementById("iaTyping"); if(el
 // ---- GuavAI: ler foto/PDF e propor lançamentos, e registrar por texto ----
 // rótulo curto de mês a partir do offset (0 = este mês)
 function mesLabelIdx(i){ const d=new Date(); d.setMonth(d.getMonth()+(+i||0)); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; }
+// ===== SKILL: matemática financeira (empréstimo, dívida, poupança) =====
+// Responde localmente com cálculos reais (Tabela Price, juros compostos).
+function pctDe(s){ const m=s.match(/(\d[\d.,]*)\s*%/); return m?num(m[1])/100:null; }
+function fmR(n){ return fmtV(Math.round(n*100)/100); }
+function respostaFinanceira(q){
+  const s=q.toLowerCase();
+  const fala=/empr[ée]stimo|financiamento|financiar|juros|taxa|d[íi]vida|divida|consignado|cheque especial|rotativo|cart[ãa]o de cr[ée]dito|\brende\b|render|rendimento|poupar|guardar|investir|cdb|cdi|poupan[çc]a|amortiza|quitar|trocar\s+d[íi]vida|portabilidade|\bcet\b|\bsac\b|price/.test(s);
+  if(!fala) return null;
+  const taxa=pctDe(s); // % a.m. assumido
+  const mMeses=s.match(/(\d+)\s*(?:meses|m[êe]s|x|vezes|parcelas)/);
+  const n=mMeses?parseInt(mMeses[1],10):null;
+  const mVal=s.match(/(?:r\$\s*)?(\d{3,}[\d.,]*)/); // valor principal (>=100)
+  const PV=mVal?num(mVal[1]):null;
+  const juros=(i,nn)=>Math.pow(1+i,nn);
+
+  // 1) EMPRÉSTIMO/FINANCIAMENTO: "empréstimo de 10000 em 24x a 2%"
+  if(/empr[ée]stimo|financiamento|financiar|consignado/.test(s) && PV && n){
+    const i=taxa!=null?taxa:0.02; const avisoTx=taxa==null?` (assumi <b>2% a.m.</b> — me diga a taxa real para eu refinar)`:"";
+    const pmt=PV*i/(1-Math.pow(1+i,-n));
+    const total=pmt*n, jt=total-PV;
+    return `📐 <b>Simulação (Tabela Price)</b>${avisoTx}:<br>
+      • Valor: <b>${fmR(PV)}</b> em <b>${n}x</b> a <b>${(i*100).toFixed(2)}% a.m.</b><br>
+      • Parcela: <b>${fmR(pmt)}</b>/mês<br>
+      • Total pago: <b>${fmR(total)}</b> → juros de <b>${fmR(jt)}</b> (${(jt/PV*100).toFixed(0)}% do valor)<br>
+      <span style="color:#556">Regra de amigo: se os juros passam de ~30% do valor, vale buscar taxa menor (consignado/portabilidade) ou prazo mais curto. Peça sempre o <b>CET</b>, que inclui tarifas e seguros.</span>`;
+  }
+  // 2) TROCA DE DÍVIDA: duas taxas na frase → compara
+  if(/trocar\s+d[íi]vida|portabilidade|refinanciar|quitar.*(cart[ãa]o|rotativo|cheque)/.test(s)){
+    const taxas=[...s.matchAll(/(\d[\d.,]*)\s*%/g)].map(x=>num(x[1]));
+    if(taxas.length>=2){
+      const [tAlta,tBaixa]=taxas[0]>=taxas[1]?[taxas[0],taxas[1]]:[taxas[1],taxas[0]];
+      const ex=PV||5000, nn=n||12;
+      const p1=ex*(tAlta/100)/(1-Math.pow(1+tAlta/100,-nn)), p2=ex*(tBaixa/100)/(1-Math.pow(1+tBaixa/100,-nn));
+      return `🔁 <b>Troca de dívida — vale a pena?</b><br>
+        Sair de <b>${tAlta}% a.m.</b> para <b>${tBaixa}% a.m.</b> em ${fmR(ex)} por ${nn} meses:<br>
+        • Parcela cai de <b>${fmR(p1)}</b> para <b>${fmR(p2)}</b> → economia de <b>${fmR((p1-p2)*nn)}</b> no total.<br>
+        <span style="color:#556">Sim, compensa — desde que o <b>CET</b> da nova operação (com tarifas/seguros/IOF) continue abaixo da taxa antiga, e você não alongue demais o prazo.</span>`;
+    }
+    return `🔁 <b>Troca de dívida</b> — a regra é simples: compensa quando o <b>CET</b> da nova dívida é menor que a taxa da atual. Ordem típica de juros: rotativo do cartão &gt; cheque especial &gt; crédito pessoal &gt; consignado. Me diga <b>valor, taxa atual e taxa proposta</b> (ex.: "trocar dívida de 8000 de 12% para 2,5% em 24x") que eu calculo a economia exata.`;
+  }
+  // 3) POUPAR/RENDER: "quanto rende guardar 500 por mês a 1%"
+  if(/\brende\b|render|rendimento|poupar|investir|guardar|juros compostos|cdb|cdi|poupan[çc]a/.test(s)){
+    const mAporte=s.match(/(\d[\d.,]*)\s*(?:reais)?\s*por\s*m[êe]s/);
+    const ap=mAporte?num(mAporte[1]):(PV&&PV<=20000?PV:500);
+    const i=taxa!=null?taxa:0.008; const nn=n||12;
+    const avisoTx=taxa==null?` (assumi <b>0,8% a.m.</b> ≈ CDI; me diga a taxa para refinar)`:"";
+    const fv=ap*((juros(i,nn)-1)/i);
+    const aportado=ap*nn;
+    return `🌱 <b>Poupando ${fmR(ap)}/mês por ${nn} meses</b>${avisoTx}:<br>
+      • Você aporta <b>${fmR(aportado)}</b> e termina com <b>${fmR(fv)}</b> → juros a favor: <b>${fmR(fv-aportado)}</b>.<br>
+      <span style="color:#556">Juros compostos trabalham dos dois lados: contra você nas dívidas, a favor quando guarda. Sua meta atual no Guava é guardar <b>${fmR(state.renda*state.metaPct)}</b>/mês — quer simular com esse valor?</span>`;
+  }
+  // 4) genérico: conceitos
+  if(/juros compostos|amortiza|price|sac\b|cet\b/.test(s)){
+    return `📚 Rapidinho: <b>Price</b> = parcelas fixas (mais juros no começo); <b>SAC</b> = parcela começa maior e cai (amortiza mais rápido, paga menos juros no total); <b>CET</b> = custo efetivo total, o número que realmente importa ao comparar propostas (inclui tarifas, seguros e IOF). Me diga valor, prazo e taxa que eu simulo os dois sistemas para você.`;
+  }
+  return null;
+}
 // Responde dúvidas de navegação/uso do app (onde está, como encontro, foi parar).
 // Funciona offline (sem a IA de nuvem). Retorna HTML ou null.
 function respostaAjuda(q){
@@ -2141,7 +2201,15 @@ function viewIncentivo(){
       <button class="btnP" style="width:100%;margin-top:14px" onclick="_g.salvarIncentivo()">${ed?'Salvar':'Adicionar evento'}</button>
       ${ed?`<button class="btnG" style="width:100%;margin-top:8px;color:var(--gpink);border-color:#F6D2CD" onclick="_g.excluirIncentivo('${ed.id}')">excluir evento</button>`:""}
     </div>
-    ${(v.link||v.tema)?`<div class="card" style="padding:0;overflow:hidden"><div style="height:160px">${miniaturaIncentivo(v)}</div></div>`:""}
+    ${(function(){ const id=ytId(v.link);
+      if(id) return `<div class="card" style="padding:0;overflow:hidden">
+        <div style="position:relative;width:100%;aspect-ratio:16/9;background:#000">
+          <iframe src="https://www.youtube-nocookie.com/embed/${id}?playsinline=1" title="vídeo do evento" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+        </div>
+        <a href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener" style="display:block;text-align:center;padding:10px;font-size:12.5px;font-weight:700;color:var(--nu);text-decoration:none">▶ abrir no YouTube</a>
+      </div>`;
+      if(v.link||v.tema) return `<div class="card" style="padding:0;overflow:hidden"><div style="height:160px">${miniaturaIncentivo(v)}</div>${v.link?`<a href="${escapeAttr(v.link)}" target="_blank" rel="noopener" style="display:block;text-align:center;padding:10px;font-size:12.5px;font-weight:700;color:var(--nu);text-decoration:none">↗ abrir link</a>`:""}</div>`;
+      return ""; })()}
   </div>`;
 }
 let incTemaTmp="viagem";
@@ -2349,9 +2417,7 @@ function cardObjetivos(){
         </div>
         <div style="font-size:16px;font-weight:800;color:${a.cor}">${Math.round(a.pct*100)}%</div>
       </div>
-      <div class="barTrack" style="margin-top:10px;background:var(--graphiteSoft);height:9px">
-        <div style="width:${Math.round(a.pct*100)}%;height:100%;border-radius:8px;background:linear-gradient(90deg,var(--ggreen),var(--emerald))"></div>
-      </div>
+      ${trilhaObjetivo(o.id, a.pct)}
       <div style="font-size:12px;color:var(--mute);line-height:1.45;margin-top:9px">${a.txt}</div>
       <div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">
         <button onclick="_g.aportarObjetivo('${o.id}')" style="flex:1;min-width:96px;background:var(--nu);border:none;color:#fff;font-size:12.5px;font-weight:700;padding:9px;border-radius:9px">＋ Guardar</button>
@@ -2365,6 +2431,26 @@ function cardObjetivos(){
     <div style="font-size:11.5px;color:var(--mute);line-height:1.4;margin-bottom:12px">Defina metas como uma viagem ou um carro. O Guava acompanha o quanto falta e o GuavAI te diz se está perto ou longe.</div>
     ${list.length?cards:`<div style="text-align:center;color:var(--mute);font-size:12.5px;padding:6px 0 12px">Nenhum objetivo ainda. Crie o primeiro abaixo. 🌱</div>`}
     ${form}
+  </div>`;
+}
+// Trilha gamificada: o mascote GuavAI "caminha" da largada 🌱 até a bandeira 🏁.
+// Humor pela proximidade: perto sorri, no meio fica animado, longe segue calmo.
+function trilhaObjetivo(id, pct){
+  const p=Math.max(0,Math.min(pct,1));
+  const humor = p>=0.66 ? "happy" : p>=0.33 ? "listening" : "idle";
+  const marcos=[0.25,0.5,0.75].map(mk=>`<div style="position:absolute;left:${mk*100}%;top:50%;transform:translate(-50%,-50%);width:2px;height:10px;background:rgba(0,0,0,.12);border-radius:2px"></div>`).join("");
+  const frase = p>=1 ? "chegou! 🎉" : p>=0.75 ? "quase lá!" : p>=0.5 ? "metade do caminho!" : p>=0.25 ? "no ritmo!" : "começando a jornada";
+  return `<div style="margin-top:12px">
+    <div style="position:relative;height:44px">
+      <div style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:10px;border-radius:8px;background:var(--graphiteSoft);overflow:hidden">
+        <div style="width:${Math.round(p*100)}%;height:100%;border-radius:8px;background:linear-gradient(90deg,var(--ggreen),var(--emerald))"></div>
+      </div>
+      ${marcos}
+      <span style="position:absolute;left:0;top:50%;transform:translate(-2px,-50%);font-size:13px">🌱</span>
+      <span style="position:absolute;right:0;top:50%;transform:translate(2px,-50%);font-size:15px">${p>=1?"🏆":"🏁"}</span>
+      <div style="position:absolute;left:${(p*100).toFixed(1)}%;top:50%;transform:translate(-50%,-50%);transition:left .5s ease">${orbeGuavAI(humor,34,'orbeObj'+id)}</div>
+    </div>
+    <div style="text-align:center;font-size:11px;color:var(--mute);margin-top:-2px">${frase}</div>
   </div>`;
 }
 function formObjetivo(){
@@ -2479,22 +2565,22 @@ let recRecorrente=false;
 function cardReceitaExtra(){
   const meses=[]; const now=new Date();
   for(let i=0;i<state.horizonte;i++){ const d=new Date(now.getFullYear(),now.getMonth()+i,1); meses.push(`<option value="${i}">${MESES[d.getMonth()]}/${d.getFullYear()}${i===0?' (este mês)':''}</option>`); }
-  const seg=(on,txt,val)=>`<button onclick="_g.setRecRecorrente(${val})" style="flex:1;padding:9px 0;border-radius:9px;border:1.5px solid ${on?'#7DE8D2':'rgba(255,255,255,.25)'};background:${on?'#7DE8D2':'transparent'};color:${on?'#063D38':'#CFF3E6'};font-size:12px;font-weight:700">${txt}</button>`;
-  return `<div class="card" style="background:linear-gradient(155deg,#0E5C4E,#063D38);border:none;color:#fff;margin-top:8px">
-    <div style="font-size:14px;font-weight:800;display:flex;align-items:center;gap:7px">💰 Adicionar receita</div>
-    <div style="font-size:11.5px;color:#7DE8D2;margin:4px 0 12px">Salário extra, 13º, PLR, bônus, restituição, aluguel recebido... entra no fluxo e melhora saldo e escore.</div>
+  const seg=(on,txt,val)=>`<button onclick="_g.setRecRecorrente(${val})" style="flex:1;padding:10px 0;border-radius:10px;border:1.5px solid ${on?'var(--nu)':'var(--line)'};background:${on?'var(--nu)':'#fff'};color:${on?'#fff':'var(--mute)'};font-size:12.5px;font-weight:700">${txt}</button>`;
+  return `<div class="card" style="margin-top:8px">
+    <div style="font-size:16px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:7px">💰 Adicionar receita</div>
+    <div style="font-size:12px;color:var(--mute);margin:4px 0 12px;line-height:1.45">Salário extra, 13º, PLR, bônus, aluguel recebido... entra no fluxo e melhora saldo e escore. 💡 Também dá para falar com o <b>GuavAI</b>: <i>"recebi 500 de freela em outubro"</i>.</div>
     <div style="display:flex;gap:8px;margin-bottom:10px">${seg(!recRecorrente,"Só num mês",false)}${seg(recRecorrente,"Todo mês (recorrente)",true)}</div>
-    <input id="recNome" placeholder="Ex: 13º salário / Aluguel recebido" style="width:100%;border:none;border-radius:10px;padding:11px;font-size:14px;margin-bottom:8px;color:#241A45">
+    <input id="recNome" class="inp" placeholder="Ex: 13º salário / Aluguel recebido" style="width:100%;margin-bottom:8px">
     <div style="display:flex;gap:8px">
-      <input id="recValor" type="text" inputmode="decimal" placeholder="Valor R$" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;color:#241A45">
+      <input id="recValor" class="inp" type="text" inputmode="decimal" placeholder="Valor R$" style="flex:1">
       ${recRecorrente
-        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.15);border-radius:10px;padding:11px;font-size:13px;font-weight:700;color:#CFF3E6">todo mês</div>`
-        : `<select id="recMes" style="flex:1;border:none;border-radius:10px;padding:11px;font-size:14px;background:#fff;color:#241A45">${meses}</select>`}
+        ? `<div style="flex:1;display:flex;align-items:center;justify-content:center;background:var(--greenSoft);border:1.5px solid #BFE0D2;border-radius:10px;font-size:13px;font-weight:700;color:var(--nu)">🔁 todo mês</div>`
+        : `<select id="recMes" class="inp" style="flex:1;background:#fff">${meses}</select>`}
     </div>
-    <button class="btnP" style="width:100%;margin-top:10px;background:var(--ggreen);color:#063" onclick="_g.addReceita()">adicionar receita</button>
+    <button class="btnP" style="width:100%;margin-top:12px" onclick="_g.addReceita()">adicionar receita</button>
     ${(state.receitas||[]).length?`<div style="margin-top:12px">${state.receitas.map(r=>{
         const quando = r.recorrente ? "todo mês" : (()=>{ const d=new Date(now.getFullYear(),now.getMonth()+(+r.mesIdx||0),1); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; })();
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,255,255,.12)"><span style="font-size:13px">${r.recorrente?'🔁 ':''}${r.nome} <span style="color:#7DE8D2;font-size:11px">${quando}</span></span><span style="display:flex;align-items:center;gap:10px"><b style="color:var(--ggreen)">+${fmtV(r.valor)}</b><button onclick="_g.delReceita('${r.id}')" style="background:none;border:none;color:var(--gpink);font-size:12px;font-weight:700">excluir</button></span></div>`;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:13px;color:var(--ink)">${r.recorrente?'🔁 ':''}${r.nome} <span style="color:var(--nu);font-size:11px">${quando}</span></span><span style="display:flex;align-items:center;gap:10px"><b style="color:var(--emerald)">+${fmtV(r.valor)}</b><button onclick="_g.delReceita('${r.id}')" style="background:none;border:none;color:var(--gpink);font-size:12px;font-weight:700">excluir</button></span></div>`;
       }).join("")}</div>`:""}
   </div>`;
 }
