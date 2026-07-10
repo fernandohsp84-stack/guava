@@ -1450,7 +1450,7 @@ function renderChat(){
     ${chatMsgs.length<=1?`<div id="chatSugestoes" style="padding:0 12px 8px;display:flex;gap:7px;overflow-x:auto">${sugestoes.map(([t,q])=>`<button onclick="_g.chatRapida('${q}')" style="white-space:nowrap;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 13px;border-radius:20px">${t}</button>`).join("")}</div>`:""}
     <div id="chatBar" style="padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:rgba(8,36,28,.6);backdrop-filter:blur(10px)">
       <button id="chatFileBtn" ${temIA?'':'disabled'} aria-label="Enviar foto ou PDF" onclick="document.getElementById('chatFile').click()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">📎</button>
-      <input id="chatFile" type="file" accept="image/*,application/pdf" style="display:none">
+      <input id="chatFile" type="file" multiple accept="image/*,application/pdf,.csv,.xlsx,.xls" style="display:none">
       <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'lançar, perguntar ou 📎 foto/PDF…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:22px;padding:13px 16px;font-size:14px;background:rgba(255,255,255,.95);color:var(--ink)">
       <button id="chatMic" class="micBtn" ${temIA?'':'disabled'} aria-label="Toque para gravar" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:19px;flex:none;${temIA?'':'opacity:.4'}">🎙️</button>
       <button id="chatSend" onclick="_g.chatEnviar()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">▸</button>
@@ -1496,6 +1496,13 @@ G.chatEnviar=async()=>{
   chatMsgs.push(userMsg); appendChatBubble(userMsg);
   if(inp) inp.value="";
   const low=q.toLowerCase();
+
+  // --- 0a) "incluir mesmo assim" — força itens marcados como duplicados ---
+  if(/incluir mesmo assim|inclua mesmo assim|pode incluir assim mesmo|for[çc]ar inclus[ãa]o|incluir duplicad/i.test(low)){
+    if(chatProposta && chatProposta.some(x=>x._dup)){ G.chatIncluirProposta(true); return; }
+    const m={de:"ia", html:"Não há itens pendentes marcados como duplicados agora. Me envie o lançamento que você quer incluir."};
+    chatMsgs.push(m); appendChatBubble(m); return;
+  }
 
   // --- 0) "Você incluiu?" / "impactou no fluxo?" — responde pela realidade do app ---
   if(/\b(voc[êe]\s+incluiu|incluiu a despesa|foi inclu[íi]d|foi registrad|voc[êe]\s+registrou|impactou\s+(?:no|o)?\s*fluxo|entrou no fluxo|adicionou\s+(?:a\s+)?despesa|j[áa]\s+(?:est[áa]|foi)\s+(?:inclu|registrad)|chegou a incluir|realmente incluiu)\b/i.test(low)){
@@ -1695,18 +1702,20 @@ function h(x){ return String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&
 let chatProposta=null;
 let ultimosLancamentos=[]; // resumo do que foi incluído nesta conversa (p/ "você incluiu?")
 function propostaChat(itens){
-  // aceita despesas (com natureza) e receitas (com _receita)
-  chatProposta = itens.map(it=> it._receita ? it : normaliza(it));
+  // aceita despesas (com natureza) e receitas (com _receita); marca duplicados
+  chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); o._dup=ehDuplicado(o); return o; });
   const linhas=chatProposta.map(it=>{
+    const dup=it._dup?` <span style="background:#FFF3E0;color:#B4632A;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">⚠️ já lançado</span>`:"";
     if(it._receita){
       const quando = it.recorrente ? "todo mês" : mesLabelIdx(it.mesIdx);
-      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>💰 ${h(it.nome)} <span style="color:#8aa2ad;font-size:11px">·receita ${quando}</span></span><b style="color:var(--emerald)">+${fmtV(it.valor)}</b></div>`;
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>💰 ${h(it.nome)}${dup} <span style="color:#8aa2ad;font-size:11px">·receita ${quando}</span></span><b style="color:var(--emerald)">+${fmtV(it.valor)}</b></div>`;
     }
     const v = it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
-    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>${h(it.nome)} <span style="color:#8aa2ad;font-size:11px">·${NAT_LABEL[it.natureza].split(" ")[0]}</span></span><b>${fmtV(v)}</b></div>`;
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>${h(it.nome)}${dup} <span style="color:#8aa2ad;font-size:11px">·${NAT_LABEL[it.natureza].split(" ")[0]}</span></span><b>${fmtV(v)}</b></div>`;
   }).join("");
-  const n=chatProposta.length;
-  const html=`Encontrei <b>${n}</b> ${n===1?'lançamento':'lançamentos'}:<div style="margin:6px 0 4px">${linhas}</div>
+  const n=chatProposta.length, nDup=chatProposta.filter(x=>x._dup).length;
+  const avisoDup=nDup?`<div style="font-size:11.5px;color:#B4632A;margin-top:6px">⚠️ ${nDup} ${nDup===1?'item parece':'itens parecem'} já lançado(s) — vou <b>ignorar</b> ao incluir, para evitar duplicidade. Se for cobrança nova mesmo, me diga "incluir mesmo assim".</div>`:"";
+  const html=`Encontrei <b>${n}</b> ${n===1?'lançamento':'lançamentos'}:<div style="margin:6px 0 4px">${linhas}</div>${avisoDup}
     <div style="display:flex;gap:8px;margin-top:8px">
       <button onclick="_g.chatIncluirProposta()" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:13px;padding:9px;border-radius:9px">incluir ${n===1?'':'tudo'}</button>
       <button onclick="_g.chatDescartarProposta()" style="background:none;border:1px solid #cfd6dd;color:#8895a5;font-weight:700;font-size:13px;padding:9px 12px;border-radius:9px">descartar</button>
@@ -1714,10 +1723,11 @@ function propostaChat(itens){
     <div style="font-size:11px;color:#8895a5;margin-top:6px">Depois é só ajustar na aba Despesas ou ➕ Adicionar.</div>`;
   const m={de:"ia", html}; chatMsgs.push(m); appendChatBubble(m);
 }
-G.chatIncluirProposta=()=>{
+G.chatIncluirProposta=(forcar)=>{
   if(!chatProposta||!chatProposta.length) return;
-  const linhas=[]; let nd=0,nr=0;
+  const linhas=[]; let nd=0,nr=0,pulados=0;
   chatProposta.forEach((it,k)=>{
+    if(it._dup && !forcar){ pulados++; return; }
     if(it._receita){
       state.receitas=state.receitas||[];
       state.receitas.push({id:"r"+Date.now()+"_"+k,nome:it.nome,valor:it.valor,mesIdx:it.recorrente?0:(+it.mesIdx||0),recorrente:!!it.recorrente,cat:"Receita"});
@@ -1733,7 +1743,9 @@ G.chatIncluirProposta=()=>{
       ultimosLancamentos.push(`${h(nome)} — ${fmtV(v)} (${det})`);
     }
   });
-  chatProposta=null;
+  const notaDup=pulados?`<div style="font-size:11.5px;color:#B4632A;margin-top:6px">↷ ${pulados} ${pulados===1?'item ignorado':'itens ignorados'} por já existirem. Para incluir assim mesmo, diga <i>"incluir mesmo assim"</i>.</div>`:"";
+  if(!linhas.length && pulados){ const m={de:"ia", html:`Todos os ${pulados} itens já estavam lançados — não dupliquei nada. ✅${notaDup}`}; chatMsgs.push(m); appendChatBubble(m); chatProposta=chatProposta.filter(x=>x._dup); return; }
+  chatProposta = pulados ? chatProposta.filter(x=>x._dup) : null;
   filtroDesp="todos";     // garante que os novos itens apareçam na lista de Despesas
   salvar(); render();      // ATUALIZA o app por trás do chat (Despesas, Projeção e gráfico)
   // efeito no mês, com tom acolhedor (gap ou sobra geram sentimento — acolher, não alarmar)
@@ -1745,7 +1757,7 @@ G.chatIncluirProposta=()=>{
     ${nd?`<button onclick="_g.irParaDe('despesas')" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver em Despesas</button>`:''}
     ${(nr||nd)?`<button onclick="_g.irParaDe('proj')" style="flex:1;background:#fff;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver na Projeção</button>`:''}
   </div>`;
-  const m={de:"ia", html:`Pronto! Incluí e já atualizei o app. Veja onde cada item entrou:<div style="margin:8px 0 2px;line-height:1.7">${linhas.join("<br>")}</div>${efeito}${botoes}`};
+  const m={de:"ia", html:`Pronto! Incluí e já atualizei o app. Veja onde cada item entrou:<div style="margin:8px 0 2px;line-height:1.7">${linhas.join("<br>")}</div>${notaDup}${efeito}${botoes}`};
   chatMsgs.push(m); appendChatBubble(m);
 };
 G.irParaDe=(t)=>{ filtroDesp="todos"; G.fecharChat(); G.setTab(t); };
@@ -1754,27 +1766,138 @@ G.chatDescartarProposta=()=>{
   const m={de:"ia", html:"Ok, descartei. Se quiser, me mande de novo ou digite manualmente."};
   chatMsgs.push(m); appendChatBubble(m);
 };
-async function onChatArquivo(e){
-  const file=e.target.files&&e.target.files[0]; if(e.target) e.target.value=""; if(!file) return;
-  if(!cfg.funcaoUrl){ const m={de:"ia", html:"Para ler foto ou PDF, ative a IA em ⚙️ Configurar."}; chatMsgs.push(m); appendChatBubble(m); return; }
-  if(file.size>8*1024*1024){ const m={de:"ia", html:"Esse arquivo é grande demais (máx. 8MB). Tente uma foto com menos resolução."}; chatMsgs.push(m); appendChatBubble(m); return; }
-  const isPdf=file.type==="application/pdf";
-  const um={de:"user", html:`📎 ${isPdf?'PDF':'Foto'} enviado para leitura`}; chatMsgs.push(um); appendChatBubble(um);
-  setChatEstado("computing"); mostrarDigitando();
-  const r=new FileReader();
-  r.onload=async()=>{
-    const b64=(r.result+"").split(",")[1];
+// ===== Leitura de arquivos (imagem/PDF via nuvem; CSV/Excel local) =====
+const ACCEPT_ARQS="image/*,application/pdf,.csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+let _xlsxLib=null;
+async function carregarXLSX(){
+  if(_xlsxLib) return _xlsxLib;
+  // carregado sob demanda do CDN (mesmo padrão do Firebase); nada do arquivo sai do aparelho
+  await new Promise((ok,err)=>{ const sc=document.createElement("script"); sc.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; sc.onload=ok; sc.onerror=err; document.head.appendChild(sc); });
+  _xlsxLib=window.XLSX; return _xlsxLib;
+}
+// linhas [ [a,b,c], ... ] -> itens {nome, valor}: acha a coluna de texto e a de valor
+function linhasParaItens(rows){
+  const itens=[];
+  for(const row of rows){
+    if(!row || !row.length) continue;
+    const cels=row.map(c=>String(c==null?"":c).trim()).filter(c=>c!=="");
+    if(!cels.length) continue;
+    let nome=null, valor=0;
+    for(const c of cels){
+      const v=parseMoeda(c);
+      const ehNum=/^-?[\d.,\sR$]+$/.test(c) && v!==0;
+      if(ehNum && Math.abs(v)>valor){ valor=Math.abs(v); }
+      else if(!ehNum && !nome && c.length>=2 && !/^\d{1,2}\/\d{1,2}/.test(c)) nome=c;
+    }
+    if(nome && valor>0 && valor<1000000){
+      const low=nome.toLowerCase();
+      if(/total|subtotal|saldo|fatura anterior|pagamento recebido/.test(low)) continue; // linhas de resumo
+      itens.push({nome:nome.slice(0,60), cat:catGuess(low), natureza:"eventual", valor, mesIdx:0});
+    }
+  }
+  return itens;
+}
+async function lerPlanilha(file){
+  const nome=(file.name||"").toLowerCase();
+  if(nome.endsWith(".csv") || file.type==="text/csv"){
+    const txt=await file.text();
+    const sep=(txt.match(/;/g)||[]).length>=(txt.match(/,/g)||[]).length?";":",";
+    const rows=txt.split(/\r?\n/).map(l=>l.split(sep));
+    return linhasParaItens(rows);
+  }
+  const X=await carregarXLSX();
+  const buf=await file.arrayBuffer();
+  const wb=X.read(buf,{type:"array"});
+  let rows=[];
+  wb.SheetNames.slice(0,3).forEach(sn=>{ rows=rows.concat(X.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true})); });
+  return linhasParaItens(rows);
+}
+// Reduz a imagem no próprio aparelho (screenshots de iPhone são PNGs de 2-5MB;
+// em base64 crescem +37% e estouram o limite da API de visão). Redimensiona
+// para no máx. 1600px e converte para JPEG ~85% — leve e legível para OCR.
+function comprimirImagem(file){
+  return new Promise((resolve)=>{
     try{
-      const resp=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(isPdf?{pdfBase64:b64}:{imagemBase64:b64,imagemTipo:file.type||"image/jpeg"})});
-      const data=await resp.json();
-      const itens=extrairItensDaResposta(data);
-      removerDigitando(); setChatEstado("idle");
-      if(!itens.length){ const m={de:"ia", html:"Não identifiquei lançamentos nesse arquivo. Pode me dizer em texto? Ex.: <i>\"mercado 250; luz 180\"</i>."}; chatMsgs.push(m); appendChatBubble(m); return; }
-      propostaChat(itens);
-    }catch(err){ removerDigitando(); setChatEstado("idle"); const m={de:"ia", html:"Não consegui ler o arquivo agora. Tente novamente em instantes."}; chatMsgs.push(m); appendChatBubble(m); }
-  };
-  r.readAsDataURL(file);
+      const url=URL.createObjectURL(file);
+      const img=new Image();
+      img.onload=()=>{
+        try{
+          const MAX=1600;
+          let w=img.naturalWidth,hh=img.naturalHeight;
+          const sc=Math.min(1, MAX/Math.max(w,hh));
+          w=Math.round(w*sc); hh=Math.round(hh*sc);
+          const cv=document.createElement("canvas"); cv.width=w; cv.height=hh;
+          cv.getContext("2d").drawImage(img,0,0,w,hh);
+          const durl=cv.toDataURL("image/jpeg",0.85);
+          URL.revokeObjectURL(url);
+          resolve({b64:durl.split(",")[1], tipo:"image/jpeg"});
+        }catch(e){ URL.revokeObjectURL(url); resolve(null); }
+      };
+      img.onerror=()=>{ URL.revokeObjectURL(url); resolve(null); };
+      img.src=url;
+    }catch(e){ resolve(null); }
+  });
+}
+async function lerImagemOuPdf(file){
+  const isPdf=file.type==="application/pdf";
+  let payload=null;
+  if(isPdf){
+    const b64=await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+"").split(",")[1]); r.onerror=()=>res(null); r.readAsDataURL(file); });
+    if(!b64) return {itens:[],erro:"leitura do PDF falhou"};
+    payload={pdfBase64:b64};
+  } else {
+    const comp=await comprimirImagem(file);
+    if(comp) payload={imagemBase64:comp.b64, imagemTipo:comp.tipo};
+    else {
+      const b64=await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+"").split(",")[1]); r.onerror=()=>res(null); r.readAsDataURL(file); });
+      if(!b64) return {itens:[],erro:"leitura da imagem falhou"};
+      payload={imagemBase64:b64, imagemTipo:file.type||"image/jpeg"};
+    }
+  }
+  try{
+    const resp=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    if(!resp.ok) return {itens:[],erro:`servidor respondeu ${resp.status}`};
+    const data=await resp.json();
+    const itens=extrairItensDaResposta(data);
+    return {itens, erro:itens.length?null:(data&&(data.erro||data.error))||null};
+  }catch(e){ return {itens:[],erro:"sem conexão com a função de IA"}; }
+}
+// ===== Duplicidade: compara com lançamentos já existentes =====
+function chaveNome(s){ return String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g," ").replace(/\s+/g," ").trim(); }
+function ehDuplicado(it){
+  if(it._receita){
+    return (state.receitas||[]).some(r=> chaveNome(r.nome)===chaveNome(it.nome) && Math.abs((+r.valor||0)-(+it.valor||0))<0.01);
+  }
+  const kn=chaveNome(it.nome), v=+(it.natureza==="parcela"?it.valor:(it.valor||0));
+  return (state.itens||[]).some(x=>{
+    const xv=+(x.natureza==="parcela"?x.valor:(x.valor||0));
+    const mesmoValor=Math.abs(xv-v)<0.01;
+    const nomeIgual=chaveNome(x.nome)===kn;
+    const nomeParecido=kn.length>3 && (chaveNome(x.nome).includes(kn)||kn.includes(chaveNome(x.nome)));
+    return mesmoValor && (nomeIgual||nomeParecido);
+  });
+}
+async function onChatArquivo(e){
+  const files=[...(e.target.files||[])]; if(e.target) e.target.value=""; if(!files.length) return;
+  const grandes=files.filter(f=>f.size>8*1024*1024);
+  if(grandes.length){ const m={de:"ia", html:`⚠️ ${grandes.length} arquivo(s) acima de 8MB foram ignorados.`}; chatMsgs.push(m); appendChatBubble(m); }
+  const ok=files.filter(f=>f.size<=8*1024*1024); if(!ok.length) return;
+  const ehPlan=f=>/\.(csv|xlsx|xls)$/i.test(f.name||"")||/csv|excel|spreadsheet/.test(f.type||"");
+  const precisaIA=ok.some(f=>!ehPlan(f));
+  if(precisaIA && !cfg.funcaoUrl){ const m={de:"ia", html:"Para ler foto ou PDF, ative a IA em ⚙️ Configurar. Planilhas (CSV/Excel) eu leio aqui mesmo!"}; chatMsgs.push(m); appendChatBubble(m); }
+  const rot=ok.map(f=>ehPlan(f)?"📊":f.type==="application/pdf"?"📄":"🖼️").join(" ");
+  const um={de:"user", html:`📎 ${ok.length} arquivo(s) enviados ${rot}`}; chatMsgs.push(um); appendChatBubble(um);
+  setChatEstado("computing"); mostrarDigitando();
+  let itens=[]; let falhas=0; let ultimoErroArq=null;
+  for(const f of ok){
+    try{
+      if(ehPlan(f)) itens=itens.concat(await lerPlanilha(f));
+      else if(cfg.funcaoUrl){ const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } itens=itens.concat(r.itens); }
+    }catch(err){ falhas++; }
+  }
+  removerDigitando(); setChatEstado("idle");
+  if(!itens.length){ const det=ultimoErroArq?`<br><span style="font-size:11.5px;color:#8895a5">Detalhe técnico: ${h(ultimoErroArq)}.</span>`:""; ultimoErroArq=null; const m={de:"ia", html:`Não consegui extrair lançamentos dos arquivos${falhas?` (${falhas} falharam)`:""}.${det}<br>Dica: fotos muito longas podem cortar — envie a fatura por partes, ou me diga os itens em texto: <i>"mercado 250; luz 180"</i>.`}; chatMsgs.push(m); appendChatBubble(m); return; }
+  propostaChat(itens);
 }
 G.chatRapida=(q)=>{
   // reaproveita o motor determinístico Analise para respostas rápidas dentro do chat
@@ -2542,7 +2665,7 @@ function viewAdd(){
       : `<div class="card" style="text-align:center;padding:24px 16px">
            <div style="font-size:34px">📑</div>
            <div style="font-size:13.5px;margin:10px 0 14px;color:var(--mute)">Envie a fatura em <b>PDF</b> ou foto. A IA lê cada linha e classifica.</div>
-           <input id="fileInp" type="file" accept="image/*,application/pdf" style="display:none">
+           <input id="fileInp" type="file" multiple accept="image/*,application/pdf,.csv,.xlsx,.xls" style="display:none">
            <button class="btnP" onclick="document.getElementById('fileInp').click()">📎 Escolher PDF ou foto</button>
            <div style="font-size:11px;color:var(--mute);text-align:center;margin-top:8px">toque para tirar foto, escolher da galeria ou anexar um PDF</div></div>`;
   } else {
@@ -2554,8 +2677,16 @@ function viewAdd(){
         ${modoAdd==='voz'?`<button id="vozBtn" class="btnG">🎙️ Falar</button>`:''}
         <button id="interpBtn" class="btnP" style="flex:1">Interpretar</button></div></div>`;
   }
-  return `<div style="padding-top:16px"><h2 style="margin-bottom:4px">Adicionar despesa</h2>
-    <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">fale, fotografe ou digite — tudo atualiza a projeção</div>
+  return `<div style="padding-top:16px"><h2 style="margin-bottom:4px">Adicionar despesa ou receita</h2>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:12px">fale, fotografe, envie planilha ou digite — tudo passa por uma prévia e atualiza a projeção</div>
+    <button onclick="_g.abrirChat()" class="card" style="width:100%;background:var(--grad-dash);border:none;color:#fff;padding:13px 14px;display:flex;align-items:center;gap:12px;text-align:left">
+      ${orbeGuavAI('idle',38,'orbeAdd')}
+      <span style="flex:1;min-width:0">
+        <span style="display:block;font-size:14px;font-weight:800">Prefere conversar? Use o GuavAI</span>
+        <span style="display:block;font-size:11.5px;color:#BEE3CC">é o mesmo cérebro daqui: fale, mande 📎 fotos, PDFs e planilhas — com prévia antes de incluir</span>
+      </span>
+      <span style="font-size:18px;color:#BEE3CC">›</span>
+    </button>
     <div style="display:flex;gap:8px;margin-bottom:14px">${tabBtn("texto","✍️ Texto")}${tabBtn("voz","🎙️ Voz")}${tabBtn("arquivo","📄 Fatura")}</div>
     ${corpo}<div id="addStatus"></div><div id="addResult"></div>
     ${cardReceitaExtra()}</div>`;
@@ -2647,13 +2778,24 @@ function toggleVoz(){
   rec.start(); ouvindo=true;
   const b=document.getElementById("vozBtn"); if(b){ b.textContent="⏹ Parar"; b.style.background="var(--guava)"; b.style.color="#fff"; }
 }
-function onArquivo(e){
-  const file=e.target.files&&e.target.files[0]; if(!file) return;
-  if(file.size>8*1024*1024){ status("Arquivo muito grande (máx 8MB). Tire a foto com menos resolução.",true); return; }
-  const isPdf=file.type==="application/pdf";
-  const r=new FileReader();
-  r.onload=()=>{ const b64=r.result.split(",")[1]; interpretar(isPdf?{pdfBase64:b64}:{imagemBase64:b64,imagemTipo:file.type||"image/jpeg"}); };
-  r.readAsDataURL(file);
+async function onArquivo(e){
+  const files=[...(e.target.files||[])]; if(e.target) e.target.value=""; if(!files.length) return;
+  const ok=files.filter(f=>f.size<=8*1024*1024);
+  if(ok.length<files.length) status("Arquivos acima de 8MB foram ignorados.",true);
+  if(!ok.length) return;
+  const ehPlan=f=>/\.(csv|xlsx|xls)$/i.test(f.name||"")||/csv|excel|spreadsheet/.test(f.type||"");
+  status(`Lendo ${ok.length} arquivo(s)…`,false);
+  let itens=[];
+  for(const f of ok){
+    try{
+      if(ehPlan(f)) itens=itens.concat(await lerPlanilha(f));
+      else if(cfg.funcaoUrl){ const r=await lerImagemOuPdf(f); itens=itens.concat(r.itens); if(!r.itens.length&&r.erro) status("Falha ao ler um arquivo: "+r.erro,true); }
+      else status("Para foto/PDF, ative a IA em ⚙️. Planilhas eu leio aqui mesmo.",true);
+    }catch(err){}
+  }
+  if(!itens.length){ status("Não identifiquei lançamentos nos arquivos.",true); return; }
+  resultadoTmp=itens.map(normaliza);
+  render(); status(`${itens.length} lançamento(s) encontrados — revise e confirme abaixo.`,false);
 }
 function status(msg,erro){
   const box=document.getElementById("addStatus"); if(!box) return;
@@ -2703,7 +2845,11 @@ async function interpretar(payload){
 // extrai itens da resposta da IA, seja {itens:[...]} ou {resposta:"...json..."}
 function extrairItensDaResposta(data){
   if(!data) return [];
+  if(Array.isArray(data)) return data;
   if(Array.isArray(data.itens)) return data.itens;
+  if(Array.isArray(data.despesas)) return data.despesas;
+  if(Array.isArray(data.lancamentos)) return data.lancamentos;
+  if(data.result) return extrairItensDaResposta(data.result);
   // a função pode devolver o JSON dentro de um texto
   const txt=data.resposta||data.texto||"";
   if(typeof txt==="string" && txt.trim()){
