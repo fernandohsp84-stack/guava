@@ -1803,14 +1803,14 @@ async function lerPlanilha(file){
     const txt=await file.text();
     const sep=(txt.match(/;/g)||[]).length>=(txt.match(/,/g)||[]).length?";":",";
     const rows=txt.split(/\r?\n/).map(l=>l.split(sep));
-    return linhasParaItens(rows);
+    return posProcessarFatura(linhasParaItens(rows));
   }
   const X=await carregarXLSX();
   const buf=await file.arrayBuffer();
   const wb=X.read(buf,{type:"array"});
   let rows=[];
   wb.SheetNames.slice(0,3).forEach(sn=>{ rows=rows.concat(X.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true})); });
-  return linhasParaItens(rows);
+  return posProcessarFatura(linhasParaItens(rows));
 }
 // Reduz a imagem no próprio aparelho (screenshots de iPhone são PNGs de 2-5MB;
 // em base64 crescem +37% e estouram o limite da API de visão). Redimensiona
@@ -1838,27 +1838,87 @@ function comprimirImagem(file){
     }catch(e){ resolve(null); }
   });
 }
+// Interpreta cada item extraído de FATURA com a mesma inteligência do texto:
+// - "LOJA 04 06" no fim do nome = parcela 4 de 6 → natureza parcela, restam 3 (5,6)
+// - remove data inicial, categoriza, ignora ajustes/estornos/pagamentos
+function posProcessarFatura(itens){
+  const out=[];
+  for(const raw of (itens||[])){
+    if(!raw) continue;
+    let nome=String(raw.nome||raw.descricao||raw.nome_item||"").trim();
+    let valor=parseMoeda(raw.valor!=null?raw.valor:raw.total);
+    if(!(valor>0)) continue;
+    // linhas que não são gasto do usuário
+    if(/ajuste|estorno|pagamento receb|pagto|cr[ée]d(?:ito)? parc|juros|multa|anuidade estornada|saldo|total/i.test(nome)) continue;
+    nome=nome.replace(/^\d{1,2}\/\d{1,2}\s+/,"");            // data "13/06 " no início
+    let natureza=raw.natureza||"eventual", restam=raw.restam, total=raw.total;
+    // padrão de parcela no fim: "04 06" ou "04/06" ou "PARC 04/06"
+    const mp=nome.match(/(?:parc\.?\s*)?(\d{1,2})\s*[\/ ]\s*(\d{1,2})\s*$/);
+    if(mp){
+      const atual=parseInt(mp[1],10), tot=parseInt(mp[2],10);
+      if(tot>=2 && atual>=1 && atual<=tot){
+        natureza="parcela";
+        restam=tot-atual+1;              // inclui a parcela desta fatura
+        total=valor*tot;
+        nome=nome.replace(mp[0],"").trim();
+      }
+    }
+    nome=nome.replace(/\s{2,}/g," ").trim();
+    if(!nome) nome="Lançamento da fatura";
+    const low=nome.toLowerCase();
+    const it={nome:nome.slice(0,60), cat:raw.cat||catGuess(low), natureza, valor};
+    if(natureza==="parcela"){ it.restam=restam; it.total=total; }
+    else it.mesIdx=raw.mesIdx||0;
+    out.push(it);
+  }
+  return out;
+}
+// remove repetições DENTRO do lote (screenshots sobrepostos mostram as mesmas linhas)
+function dedupLote(itens){
+  const vistos=new Set(); const out=[];
+  for(const it of itens){
+    const k=chaveNome(it.nome)+"|"+Math.round((+it.valor||0)*100)+"|"+(it.natureza||"");
+    if(vistos.has(k)) continue; vistos.add(k); out.push(it);
+  }
+  return out;
+}
+// heurística: a extração veio "vazia" (sem nomes)? típico de leitura ruim/eco de exemplo
+function extracaoRuim(itens){
+  if(!itens.length) return false;
+  const semNome=itens.filter(x=>!x.nome||/^(despesa|item|lan[çc]amento)/i.test(String(x.nome).trim())).length;
+  return semNome>=Math.ceil(itens.length*0.6);
+}
+const INSTRUCOES_FATURA="Extraia TODOS os lançamentos visíveis desta fatura de cartão. Responda SOMENTE um JSON array, sem texto ao redor: [{\"nome\":string,\"valor\":number,\"parcelaAtual\":number|null,\"parcelaTotal\":number|null}]. Regras: o nome é a descrição do estabelecimento SEM a data; números no fim como '04 06' indicam parcela 4 de 6 (preencha parcelaAtual/parcelaTotal); valor em reais com centavos; ignore linhas de AJUSTE, ESTORNO, PAGAMENTO, TOTAL e créditos.";
 async function lerImagemOuPdf(file){
   const isPdf=file.type==="application/pdf";
   let payload=null;
   if(isPdf){
     const b64=await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+"").split(",")[1]); r.onerror=()=>res(null); r.readAsDataURL(file); });
     if(!b64) return {itens:[],erro:"leitura do PDF falhou"};
-    payload={pdfBase64:b64};
+    payload={pdfBase64:b64, instrucoes:INSTRUCOES_FATURA};
   } else {
     const comp=await comprimirImagem(file);
-    if(comp) payload={imagemBase64:comp.b64, imagemTipo:comp.tipo};
+    if(comp) payload={imagemBase64:comp.b64, imagemTipo:comp.tipo, instrucoes:INSTRUCOES_FATURA};
     else {
       const b64=await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+"").split(",")[1]); r.onerror=()=>res(null); r.readAsDataURL(file); });
       if(!b64) return {itens:[],erro:"leitura da imagem falhou"};
-      payload={imagemBase64:b64, imagemTipo:file.type||"image/jpeg"};
+      payload={imagemBase64:b64, imagemTipo:file.type||"image/jpeg", instrucoes:INSTRUCOES_FATURA};
     }
   }
   try{
     const resp=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     if(!resp.ok) return {itens:[],erro:`servidor respondeu ${resp.status}`};
     const data=await resp.json();
-    const itens=extrairItensDaResposta(data);
+    let itens=extrairItensDaResposta(data);
+    // converte parcelaAtual/parcelaTotal (se a função obedecer às instruções)
+    itens=(itens||[]).map(x=>{
+      if(x && x.parcelaTotal>=2 && x.parcelaAtual>=1){
+        return {nome:x.nome, valor:parseMoeda(x.valor), natureza:"parcela", restam:x.parcelaTotal-x.parcelaAtual+1, total:parseMoeda(x.valor)*x.parcelaTotal, cat:x.cat};
+      }
+      return x;
+    });
+    itens=posProcessarFatura(itens);
+    if(extracaoRuim(itens)) return {itens:[], erro:"a leitura da imagem veio sem descrições (qualidade baixa) — tente PDF/CSV da fatura ou screenshots mais nítidos"};
     return {itens, erro:itens.length?null:(data&&(data.erro||data.error))||null};
   }catch(e){ return {itens:[],erro:"sem conexão com a função de IA"}; }
 }
@@ -1895,6 +1955,7 @@ async function onChatArquivo(e){
       else if(cfg.funcaoUrl){ const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } itens=itens.concat(r.itens); }
     }catch(err){ falhas++; }
   }
+  itens=dedupLote(itens);
   removerDigitando(); setChatEstado("idle");
   if(!itens.length){ const det=ultimoErroArq?`<br><span style="font-size:11.5px;color:#8895a5">Detalhe técnico: ${h(ultimoErroArq)}.</span>`:""; ultimoErroArq=null; const m={de:"ia", html:`Não consegui extrair lançamentos dos arquivos${falhas?` (${falhas} falharam)`:""}.${det}<br>Dica: fotos muito longas podem cortar — envie a fatura por partes, ou me diga os itens em texto: <i>"mercado 250; luz 180"</i>.`}; chatMsgs.push(m); appendChatBubble(m); return; }
   propostaChat(itens);
@@ -2793,6 +2854,7 @@ async function onArquivo(e){
       else status("Para foto/PDF, ative a IA em ⚙️. Planilhas eu leio aqui mesmo.",true);
     }catch(err){}
   }
+  itens=dedupLote(itens);
   if(!itens.length){ status("Não identifiquei lançamentos nos arquivos.",true); return; }
   resultadoTmp=itens.map(normaliza);
   render(); status(`${itens.length} lançamento(s) encontrados — revise e confirme abaixo.`,false);
@@ -2975,15 +3037,18 @@ function nomeItem(parte,low){
   return n && !ruim ? n : "Despesa";
 }
 function catGuess(s){
-  if(/farm[áa]cia|drogaria|rem[ée]dio|m[ée]dic|dentista|consulta|sa[úu]de|plano de sa[úu]de|hospital|exame/.test(s)) return "Saúde";
-  if(/mercado|supermerc|feira|hortifr[uú]ti/.test(s)) return "Mercado";
-  if(/caf[ée]|padaria|lanche|restaurante|delivery|ifood|bar\b|pizza|almo[çc]o|jantar/.test(s)) return "Alimentação";
-  if(/luz|energia|água|agua|internet|telefone|celular|tv\b|streaming|netflix|spotify/.test(s)) return "Contas";
+  if(/farm[áa]cia|drogaria|drogasil|drog(?:a|as)?\b|raia\b|pague menos|rem[ée]dio|m[ée]dic|dentista|consulta|sa[úu]de|plano de sa[úu]de|hospital|exame/.test(s)) return "Saúde";
+  if(/apple com|apple\.com|google one|google\b|netflix|spotify|disney|hbo|max\b|prime video|amazon prime|icloud|streaming|assinatura/.test(s)) return "Assinaturas";
+  if(/seguro|tokio marine|porto seguro|azul seguros|bradesco seguro/.test(s)) return "Seguros";
+  if(/mercado|supermerc|feira|hortifr[uú]ti|emporio|empório|atacad/.test(s)) return "Mercado";
+  if(/caf[ée]|padaria|lanche|restaurante|delivery|ifood|ifd\b|bar\b|pizza|almo[çc]o|jantar|parrilla|churrasc|bbq|burger|hamburg|chocolat|biscoito|doceria|sorvete/.test(s)) return "Alimentação";
+  if(/hotel|pousada|resort|airbnb|booking|viagem|latam|gol\b|azul linhas|decolar/.test(s)) return "Viagem/Lazer";
+  if(/luz|energia|água|agua|internet|telefone|celular|claro\b|vivo\b|tim\b|oi\b|tv\b/.test(s)) return "Contas";
   if(/ipva|iptu|imposto|taxa/.test(s)) return "Impostos";
-  if(/gasolina|combust|uber|99|t[áa]xi|transporte|ônibus|onibus|metr[ôo]|estacionamento|pedágio|pedagio/.test(s)) return "Transporte";
-  if(/escola|curso|faculdade|mensalidade escolar|material escolar|livro/.test(s)) return "Educação";
+  if(/gasolina|combust|uber|99|t[áa]xi|transporte|ônibus|onibus|metr[ôo]|estacionamento|pedágio|pedagio|posto\b/.test(s)) return "Transporte";
+  if(/escola|curso|faculdade|mensalidade escolar|material escolar|livraria|livro/.test(s)) return "Educação";
   if(/aluguel|financ|condom|prestação|prestacao/.test(s)) return "Moradia";
-  if(/roupa|cal[çc]ado|loja|shopping|vestu[áa]rio/.test(s)) return "Compras";
+  if(/roupa|cal[çc]ado|loja|shopping|vestu[áa]rio|estok|[óo]tica|zerezes|joalheria/.test(s)) return "Compras";
   if(/academia|sal[ãa]o|barbeiro|beleza|est[ée]tica/.test(s)) return "Pessoal";
   return "Outros";
 }
