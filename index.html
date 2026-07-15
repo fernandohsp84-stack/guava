@@ -1210,6 +1210,7 @@ function cardIncentivos(){
       <div style="padding:8px 10px 10px;background:linear-gradient(180deg,rgba(10,37,64,.0),#0A2540 60%)">
         <div style="font-size:12px;font-weight:700;color:#fff;line-height:1.25">${inc.titulo||"Evento"}</div>
         ${inc.valor?`<div style="font-size:11px;color:var(--ggreen);font-weight:700;margin-top:3px">meta ${fmt(inc.valor)}</div>`:""}
+        ${(function(){ const fs=FotosStore.get(inc.id); return fs.length?`<div style="font-size:10px;color:#BEE3CC;font-weight:700;margin-top:3px">📸 ${fs.length} · ⭐ ${pontosPasseio(fs)} pts</div>`:""; })()}
       </div>
     </div>`;
   }).join("");
@@ -1775,6 +1776,18 @@ async function carregarXLSX(){
   await new Promise((ok,err)=>{ const sc=document.createElement("script"); sc.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; sc.onload=ok; sc.onerror=err; document.head.appendChild(sc); });
   _xlsxLib=window.XLSX; return _xlsxLib;
 }
+// valor numérico de célula de planilha/extrato: entende "1.234,56" (pt-BR),
+// "12.34" e "-12.34" (Nubank/planilhas com ponto decimal) e "R$ 95,16"
+function valorCelula(c){
+  const t=String(c==null?"":c).trim();
+  if(!t) return null;
+  if(/^-?\d+\.\d{1,2}$/.test(t)) return parseFloat(t);                 // ponto decimal
+  if(/^-?\d+$/.test(t)) return parseInt(t,10);                            // inteiro puro
+  if(/^-?(?:R\$\s*)?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?$/.test(t) ||     // pt-BR
+     /^-?(?:R\$\s*)?\d+,\d{1,2}$/.test(t)) return parseMoeda(t);
+  return null;
+}
+const ehDataCelula=c=>/^\d{4}-\d{2}-\d{2}/.test(c)||/^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?$/.test(c);
 // linhas [ [a,b,c], ... ] -> itens {nome, valor}: acha a coluna de texto e a de valor
 function linhasParaItens(rows){
   const itens=[];
@@ -1782,22 +1795,24 @@ function linhasParaItens(rows){
     if(!row || !row.length) continue;
     const cels=row.map(c=>String(c==null?"":c).trim()).filter(c=>c!=="");
     if(!cels.length) continue;
-    let nome=null, valor=0;
+    let nome=null, valor=0, ehCredito=false;
     for(const c of cels){
-      const v=parseMoeda(c);
-      const ehNum=/^-?[\d.,\sR$]+$/.test(c) && v!==0;
-      if(ehNum && Math.abs(v)>valor){ valor=Math.abs(v); }
-      else if(!ehNum && !nome && c.length>=2 && !/^\d{1,2}\/\d{1,2}/.test(c)) nome=c;
+      if(ehDataCelula(c)) continue;                       // datas não são nome nem valor
+      const v=valorCelula(c);
+      if(v!=null){ if(v<0) ehCredito=true; if(Math.abs(v)>valor) valor=Math.abs(v); }
+      else if(!nome && c.length>=2 && !/^[\d.,\-\/]+$/.test(c)) nome=c;
     }
+    if(ehCredito) continue;                               // estornos/pagamentos (valor negativo)
     if(nome && valor>0 && valor<1000000){
       const low=nome.toLowerCase();
-      if(/total|subtotal|saldo|fatura anterior|pagamento recebido/.test(low)) continue; // linhas de resumo
+      if(/total|subtotal|saldo|fatura anterior|pagamento recebido|pagamento de fatura|pagamento em/.test(low)) continue;
       itens.push({nome:nome.slice(0,60), cat:catGuess(low), natureza:"eventual", valor, mesIdx:0});
     }
   }
   return itens;
 }
 async function lerPlanilha(file){
+  if(!file.size) throw new Error("arquivo vazio (0 bytes) — exporte novamente do app do banco");
   const nome=(file.name||"").toLowerCase();
   if(nome.endsWith(".csv") || file.type==="text/csv"){
     const txt=await file.text();
@@ -1889,10 +1904,88 @@ function extracaoRuim(itens){
   return semNome>=Math.ceil(itens.length*0.6);
 }
 const INSTRUCOES_FATURA="Extraia TODOS os lançamentos visíveis desta fatura de cartão. Responda SOMENTE um JSON array, sem texto ao redor: [{\"nome\":string,\"valor\":number,\"parcelaAtual\":number|null,\"parcelaTotal\":number|null}]. Regras: o nome é a descrição do estabelecimento SEM a data; números no fim como '04 06' indicam parcela 4 de 6 (preencha parcelaAtual/parcelaTotal); valor em reais com centavos; ignore linhas de AJUSTE, ESTORNO, PAGAMENTO, TOTAL e créditos.";
+// ---- Extração local de texto de PDF (pdf.js do CDN, sob demanda) ----
+let _pdfjs=null;
+async function carregarPDFJS(){
+  if(_pdfjs) return _pdfjs;
+  await new Promise((ok,err)=>{ const sc=document.createElement("script"); sc.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"; sc.onload=ok; sc.onerror=err; document.head.appendChild(sc); });
+  _pdfjs=window["pdfjsLib"];
+  try{ _pdfjs.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; }catch(e){}
+  return _pdfjs;
+}
+// devolve as LINHAS de texto do PDF (agrupadas por posição vertical)
+async function extrairTextoPDF(file){
+  const P=await carregarPDFJS();
+  const buf=await file.arrayBuffer();
+  const doc=await P.getDocument({data:buf}).promise;
+  const linhas=[];
+  const nPag=Math.min(doc.numPages,12);
+  for(let p=1;p<=nPag;p++){
+    const page=await doc.getPage(p);
+    const tc=await page.getTextContent();
+    const porY={};
+    for(const it of tc.items){
+      const y=Math.round((it.transform&&it.transform[5]||0)/3)*3; // agrupa ~3px
+      (porY[y]=porY[y]||[]).push({x:it.transform?it.transform[4]:0, s:it.str});
+    }
+    const ys=Object.keys(porY).map(Number).sort((a,b)=>b-a);
+    for(const y of ys){
+      const linha=porY[y].sort((a,b)=>a.x-b.x).map(t=>t.s).join(" ").replace(/\s{2,}/g," ").trim();
+      if(linha) linhas.push(linha);
+    }
+  }
+  try{ doc.destroy(); }catch(e){}
+  return linhas;
+}
+// interpreta linhas de fatura (BB, CAIXA, Nubank...): "DD/MM DESCRIÇÃO ... 1.234,56 [D|C]"
+function parseLinhasFatura(linhas){
+  const out=[];
+  const IGNORAR=/saldo|pagamento|pagto|ajuste|iof\b|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|juros|multa|mora\b|limite|vencimento|\bcet\b|anuidade|estorno|cr[ée]dito rotativo|parcelamento da fatura|d[óo]lar|peso argentino|us\$|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers/i;
+  for(let L of linhas){
+    if(!L || L.length<6) continue;
+    if(IGNORAR.test(L)) continue;
+    // valor no fim: 1.234,56 ou 123,45, sufixo opcional D (débito) / C (crédito)
+    const mv=L.match(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])?\s*$/);
+    if(!mv) continue;
+    if(mv[2]==="C") continue;                              // crédito não é gasto
+    const valor=parseMoeda(mv[1]);
+    if(!(valor>0) || valor>200000) continue;
+    let desc=L.slice(0,mv.index).trim();
+    desc=desc.replace(/^[^A-Za-z0-9]*\d{2}\/\d{2}(?:\/\d{2,4})?\s*/,"");  // data inicial
+    // remove sufixos de cidade/país em laço ("... SAO PAULO BR" tem 2 tokens)
+    const CIDADE=/\s+(BR|AR|US|CL|UY|BRASILIA|SAO PAULO|OSASCO|BARUERI|CURITIBA|PINHAIS|CRUZEIRO|GUARULHOS|SOROCABA|EZEIZA|RIO DE JANEIR[O]?|CAPITAL FEDER|VILLA LA ANGO|PALMITAL DE M|Asa Sul|Bras[íi]lia|Sao Paulo)\s*$/i;
+    let antes; do{ antes=desc; desc=desc.replace(CIDADE,"").trim(); }while(desc!==antes);
+    if(!desc || desc.length<2) continue;
+    // parcela: "02 DE 12", "01/03", "PARC 01/03", "02DE12"
+    let parcelaAtual=null, parcelaTotal=null;
+    const mp=desc.match(/(?:PARC\.?\s*)?(\d{1,2})\s*(?:DE|\/|\s)\s*(\d{1,2})\s*$/i);
+    if(mp){
+      const a=parseInt(mp[1],10), t=parseInt(mp[2],10);
+      if(t>=2 && t<=48 && a>=1 && a<=t){ parcelaAtual=a; parcelaTotal=t; desc=desc.slice(0,mp.index).trim(); }
+    }
+    if(!desc) desc="Lançamento da fatura";
+    out.push({nome:desc, valor, parcelaAtual, parcelaTotal});
+  }
+  return out;
+}
 async function lerImagemOuPdf(file){
-  const isPdf=file.type==="application/pdf";
+  const isPdf=file.type==="application/pdf"||/\.pdf$/i.test(file.name||"");
   let payload=null;
   if(isPdf){
+    // 1º: extrai o TEXTO do PDF aqui no aparelho e interpreta localmente
+    try{
+      const linhas=await extrairTextoPDF(file);
+      if(linhas.length){
+        const brutos=parseLinhasFatura(linhas);
+        const itens=posProcessarFatura(brutos.map(x=>{
+          if(x.parcelaTotal>=2 && x.parcelaAtual>=1) return {nome:x.nome, valor:x.valor, natureza:"parcela", restam:x.parcelaTotal-x.parcelaAtual+1, total:x.valor*x.parcelaTotal};
+          return {nome:x.nome, valor:x.valor};
+        }));
+        if(itens.length) return {itens, erro:null};
+        if(linhas.join(" ").length>400) return {itens:[], erro:"li o PDF mas não achei linhas de lançamento no padrão de fatura"};
+      }
+    }catch(e){ /* segue para a nuvem */ }
+    if(!cfg.funcaoUrl) return {itens:[], erro:"PDF sem texto legível (escaneado?) e IA de nuvem desligada"};
     const b64=await new Promise(res=>{ const r=new FileReader(); r.onload=()=>res((r.result+"").split(",")[1]); r.onerror=()=>res(null); r.readAsDataURL(file); });
     if(!b64) return {itens:[],erro:"leitura do PDF falhou"};
     payload={pdfBase64:b64, instrucoes:INSTRUCOES_FATURA};
@@ -2363,6 +2456,130 @@ G.verMes=i=>{ mesDetalhe=i; tab="detalheMes"; render(); window.scrollTo(0,0); };
 G.voltarProj=()=>{ tab="proj"; render(); window.scrollTo(0,0); };
 
 // ---------- Incentivo (evento/viagem programado) ----------
+
+// ===== Galeria do passeio: fotos comprimidas + local (GPS EXIF) + pontos =====
+// As fotos ficam SÓ neste aparelho (localStorage separado), fora do documento de
+// sincronização — para não estourar o limite de 1MB do Firestore nem pesar o app.
+const LS_FOTOS="guava_fotos_v1";
+const FotosStore={
+  _all(){ try{ return JSON.parse(localStorage.getItem(LS_FOTOS)||"{}"); }catch{ return {}; } },
+  get(id){ return this._all()[id]||[]; },
+  set(id,arr){ const a=this._all(); a[id]=arr; try{ localStorage.setItem(LS_FOTOS,JSON.stringify(a)); }catch(e){ alert("Memória de fotos cheia neste aparelho — apague algumas fotos antigas."); } },
+  del(id){ const a=this._all(); delete a[id]; try{ localStorage.setItem(LS_FOTOS,JSON.stringify(a)); }catch{} },
+};
+// GPS a partir do EXIF de um JPEG (parser mínimo; funciona com fotos da câmera)
+function exifGPS(buf){
+  try{
+    const v=new DataView(buf);
+    if(v.getUint16(0)!==0xFFD8) return null; // não é JPEG
+    let off=2;
+    while(off<v.byteLength-4){
+      if(v.getUint8(off)!==0xFF) break;
+      const marker=v.getUint8(off+1), size=v.getUint16(off+2);
+      if(marker===0xE1){
+        if(v.getUint32(off+4)===0x45786966){ // "Exif"
+          const tiff=off+10;
+          const little=v.getUint16(tiff)===0x4949;
+          const g16=o=>v.getUint16(o,little), g32=o=>v.getUint32(o,little);
+          const ifd0=tiff+g32(tiff+4);
+          const n=g16(ifd0);
+          let gpsOff=null;
+          for(let i=0;i<n;i++){
+            const e=ifd0+2+i*12;
+            if(g16(e)===0x8825){ gpsOff=tiff+g32(e+8); break; }
+          }
+          if(gpsOff==null) return null;
+          const gn=g16(gpsOff);
+          let latRef=null,lonRef=null,lat=null,lon=null;
+          const rac=(o)=>{ const p=tiff+g32(o+8); const rd=k=>g32(p+k*8)/(g32(p+k*8+4)||1); return rd(0)+rd(1)/60+rd(2)/3600; };
+          for(let i=0;i<gn;i++){
+            const e=gpsOff+2+i*12, tag=g16(e);
+            if(tag===1) latRef=String.fromCharCode(v.getUint8(e+8));
+            else if(tag===2) lat=rac(e);
+            else if(tag===3) lonRef=String.fromCharCode(v.getUint8(e+8));
+            else if(tag===4) lon=rac(e);
+          }
+          if(lat==null||lon==null) return null;
+          if(latRef==="S") lat=-lat; if(lonRef==="W") lon=-lon;
+          if(!isFinite(lat)||!isFinite(lon)||(!lat&&!lon)) return null;
+          return {lat:+lat.toFixed(6), lon:+lon.toFixed(6)};
+        }
+      }
+      off+=2+size;
+    }
+  }catch(e){}
+  return null;
+}
+function miniaturaFoto(file){ // thumb 480px jpeg ~30-60KB
+  return new Promise((resolve)=>{
+    const url=URL.createObjectURL(file); const img=new Image();
+    img.onload=()=>{ try{
+      const MAX=480; let w=img.naturalWidth,hh=img.naturalHeight;
+      const sc=Math.min(1,MAX/Math.max(w,hh)); w=Math.round(w*sc); hh=Math.round(hh*sc);
+      const cv=document.createElement("canvas"); cv.width=w; cv.height=hh;
+      cv.getContext("2d").drawImage(img,0,0,w,hh);
+      const d=cv.toDataURL("image/jpeg",0.72);
+      URL.revokeObjectURL(url); resolve(d);
+    }catch(e){ URL.revokeObjectURL(url); resolve(null); } };
+    img.onerror=()=>{ URL.revokeObjectURL(url); resolve(null); };
+    img.src=url;
+  });
+}
+function pontosPasseio(fotos){
+  const gps=fotos.filter(f=>f.lat!=null).length;
+  return fotos.length*10 + (gps?20:0) + gps*5;
+}
+G.addFotosEvento=async(id,ev)=>{
+  const files=[...(ev.target.files||[])]; if(ev.target) ev.target.value=""; if(!files.length) return;
+  let fotos=FotosStore.get(id);
+  if(fotos.length+files.length>12){ alert("Máximo de 12 fotos por passeio (para não pesar o aparelho)."); return; }
+  status("Guardando memórias… 📸",false);
+  for(const f of files.slice(0,12-fotos.length)){
+    if(!/^image\//.test(f.type||"")) continue;
+    let gps=null;
+    try{ gps=exifGPS(await f.arrayBuffer()); }catch{}
+    const thumb=await miniaturaFoto(f);
+    if(thumb) fotos.push({img:thumb, lat:gps?gps.lat:null, lon:gps?gps.lon:null, t:Date.now()});
+  }
+  FotosStore.set(id,fotos);
+  render(); status(`Fotos adicionadas ✓ ${fotos.some(f=>f.lat!=null)?"— com localização 📍":""}`,false);
+};
+G.delFotoEvento=(id,idx)=>{ const fotos=FotosStore.get(id); fotos.splice(idx,1); FotosStore.set(id,fotos); render(); };
+G.verFotoEvento=(id,idx)=>{
+  const f=FotosStore.get(id)[idx]; if(!f) return;
+  const mapa=f.lat!=null?`<a href="https://www.openstreetmap.org/?mlat=${f.lat}&mlon=${f.lon}#map=16/${f.lat}/${f.lon}" target="_blank" rel="noopener" style="display:inline-block;margin-top:10px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;font-weight:700;font-size:13px;padding:9px 16px;border-radius:11px;text-decoration:none">📍 ver onde foi tirada</a>`:"";
+  document.body.insertAdjacentHTML("beforeend",`<div id="fotoOv" onclick="this.remove()" style="position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px">
+    <img src="${f.img}" style="max-width:100%;max-height:78vh;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.6)">
+    ${mapa}<div style="color:rgba(255,255,255,.6);font-size:11px;margin-top:10px">toque para fechar</div></div>`);
+};
+function galeriaPasseio(id){
+  const fotos=FotosStore.get(id);
+  const pts=pontosPasseio(fotos);
+  const comGps=fotos.filter(f=>f.lat!=null);
+  const grid = fotos.map((f,i)=>`<div style="position:relative;aspect-ratio:1;border-radius:11px;overflow:hidden">
+      <img src="${f.img}" onclick="_g.verFotoEvento('${id}',${i})" style="width:100%;height:100%;object-fit:cover">
+      ${f.lat!=null?`<span style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:7px">📍</span>`:""}
+      <button onclick="_g.delFotoEvento('${id}',${i})" style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.55);color:#fff;font-size:11px;line-height:1">✕</button>
+    </div>`).join("");
+  const mapa = comGps.length? (function(){ const f=comGps[0]; const d=0.004;
+      const bbox=`${(f.lon-d).toFixed(5)},${(f.lat-d).toFixed(5)},${(f.lon+d).toFixed(5)},${(f.lat+d).toFixed(5)}`;
+      return `<div style="border-radius:12px;overflow:hidden;margin-top:10px;border:1px solid var(--line)">
+        <iframe src="https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${f.lat},${f.lon}" style="width:100%;height:170px;border:0" loading="lazy" title="mapa do passeio"></iframe>
+      </div>
+      <div style="font-size:11px;color:var(--mute);margin-top:5px;text-align:center">📍 ${comGps.length} de ${fotos.length} fotos com localização — toque numa foto para ver no mapa</div>`; })() : "";
+  return `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div style="font-size:14px;font-weight:800;color:var(--ink)">📸 Memórias do passeio</div>
+      ${fotos.length?`<span style="background:var(--greenSoft);color:var(--nu);font-size:11.5px;font-weight:800;padding:4px 10px;border-radius:10px">⭐ ${pts} pts</span>`:""}
+    </div>
+    <div style="font-size:11.5px;color:var(--mute);line-height:1.45;margin-bottom:10px">Cada foto vale <b>10 pts</b> (+5 com 📍 localização). As fotos ficam <b>só neste aparelho</b> e o local vem do GPS da própria foto, quando disponível.</div>
+    ${fotos.length?`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px">${grid}</div>`:`<div style="text-align:center;color:var(--mute);font-size:12.5px;padding:4px 0 10px">Nenhuma foto ainda — registre as memórias! 🌱</div>`}
+    ${mapa}
+    <button onclick="document.getElementById('fotosEvt').click()" class="btnG" style="width:100%;margin-top:12px;color:var(--nu);border-color:#CBEAD9">＋ adicionar fotos do passeio</button>
+    <input id="fotosEvt" type="file" multiple accept="image/*" style="display:none" onchange="_g.addFotosEvento('${id}',event)">
+  </div>`;
+}
+
 function viewIncentivo(){
   const ed=(state.incentivos||[]).find(x=>x.id===incEdit);
   const v=ed||{titulo:"",data:"",valor:"",tema:"viagem",link:""};
@@ -2383,8 +2600,10 @@ function viewIncentivo(){
       <label class="fld">Link da foto/vídeo (opcional)<input id="incLink" class="inp" value="${escapeAttr(v.link||'')}" placeholder="cole link do YouTube, Fotos, Drive..."></label>
       <div style="font-size:11px;color:var(--mute);margin-top:6px;line-height:1.4">💡 Cole um link do YouTube (mostra a capa do vídeo), ou de Google Fotos/Drive. Sem link, usamos uma capa temática. As mídias ficam na nuvem — não pesam no app.</div>
       <button class="btnP" style="width:100%;margin-top:14px" onclick="_g.salvarIncentivo()">${ed?'Salvar':'Adicionar evento'}</button>
+      ${ed?"":`<div style="font-size:11px;color:var(--mute);margin-top:8px;text-align:center">salve o evento para liberar a 📸 galeria de fotos e o mapa</div>`}
       ${ed?`<button class="btnG" style="width:100%;margin-top:8px;color:var(--gpink);border-color:#F6D2CD" onclick="_g.excluirIncentivo('${ed.id}')">excluir evento</button>`:""}
     </div>
+    ${ed?galeriaPasseio(ed.id):""}
     ${(function(){ const id=ytId(v.link);
       if(id) return `<div class="card" style="padding:0;overflow:hidden">
         <div style="position:relative;width:100%;aspect-ratio:16/9;background:#000">
@@ -2412,7 +2631,7 @@ G.salvarIncentivo=()=>{
   if(ed){ Object.assign(ed,obj); } else { obj.id="i"+Date.now(); state.incentivos.push(obj); }
   salvar(); tab="inicio"; incEdit=null; render(); window.scrollTo(0,0);
 };
-G.excluirIncentivo=id=>{ if(!confirm("Excluir este evento?")) return; state.incentivos=(state.incentivos||[]).filter(x=>x.id!==id); salvar(); tab="inicio"; incEdit=null; render(); };
+G.excluirIncentivo=id=>{ if(!confirm("Excluir este evento?")) return; state.incentivos=(state.incentivos||[]).filter(x=>x.id!==id); FotosStore.del(id); salvar(); tab="inicio"; incEdit=null; render(); };
 G.fecharIncentivo=()=>{ tab="inicio"; incEdit=null; render(); window.scrollTo(0,0); };
 
 // ---------- Despesas ----------
