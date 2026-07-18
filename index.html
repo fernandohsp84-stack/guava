@@ -1790,7 +1790,7 @@ G.propRestam=(i,v)=>{
 function propostaChat(itens){
   // aceita despesas (com natureza) e receitas (com _receita); marca duplicados
   // e já vem tudo selecionado, exceto o que parece repetido
-  chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); o._dup=ehDuplicado(o); o._sel=!o._dup; return o; });
+  chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); delete o._src; o._dup=ehDuplicado(o); o._sel=!o._dup; return o; });
   propMsg={de:"ia", html:`<div id="propBox">${propostaHTML()}</div>`};
   chatMsgs.push(propMsg); appendChatBubble(propMsg);
 }
@@ -1973,13 +1973,26 @@ function posProcessarFatura(itens){
   return out;
 }
 // remove repetições DENTRO do lote (screenshots sobrepostos mostram as mesmas linhas)
+// Remove apenas a SOBREPOSIÇÃO entre arquivos diferentes (ex.: dois screenshots
+// da mesma fatura mostrando as mesmas linhas). Repetições legítimas dentro do
+// MESMO arquivo são preservadas — uma fatura pode ter 3 compras iguais de R$ 11,46.
+// Critério: para cada item idêntico, mantemos a maior quantidade vista num único arquivo.
 function dedupLote(itens){
-  const vistos=new Set(); const out=[];
-  for(const it of itens){
+  const grupos=new Map();
+  itens.forEach((it,idx)=>{
     const k=chaveNome(it.nome)+"|"+Math.round((+it.valor||0)*100)+"|"+(it.natureza||"");
-    if(vistos.has(k)) continue; vistos.add(k); out.push(it);
+    if(!grupos.has(k)) grupos.set(k,[]);
+    grupos.get(k).push({idx, src:(it._src==null?0:it._src)});
+  });
+  const manter=new Set();
+  for(const [,arr] of grupos){
+    const porArquivo=new Map();
+    arr.forEach(o=>{ if(!porArquivo.has(o.src)) porArquivo.set(o.src,[]); porArquivo.get(o.src).push(o); });
+    let melhor=null;                                  // arquivo que leu mais ocorrências
+    for(const [,lista] of porArquivo){ if(!melhor || lista.length>melhor.length) melhor=lista; }
+    melhor.forEach(o=>manter.add(o.idx));
   }
-  return out;
+  return itens.filter((_,i)=>manter.has(i));
 }
 // heurística: a extração veio "vazia" (sem nomes)? típico de leitura ruim/eco de exemplo
 function extracaoRuim(itens){
@@ -2141,11 +2154,13 @@ async function onChatArquivo(e){
   const um={de:"user", html:`📎 ${ok.length} arquivo(s) enviados ${rot}`}; chatMsgs.push(um); appendChatBubble(um);
   setChatEstado("computing"); mostrarDigitando();
   let itens=[]; let falhas=0; let ultimoErroArq=null;
-  for(const f of ok){
+  for(let fi=0; fi<ok.length; fi++){
+    const f=ok[fi];
+    const marcar=arr=>{ (arr||[]).forEach(x=>{ if(x) x._src=fi; }); return arr||[]; };
     try{
-      if(ehPlan(f)) itens=itens.concat(await lerPlanilha(f));
-      else if(cfg.funcaoUrl){ const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } itens=itens.concat(r.itens); }
-    }catch(err){ falhas++; }
+      if(ehPlan(f)) itens=itens.concat(marcar(await lerPlanilha(f)));
+      else { const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } itens=itens.concat(marcar(r.itens)); }
+    }catch(err){ falhas++; if(err&&err.message) ultimoErroArq=err.message; }
   }
   itens=dedupLote(itens);
   removerDigitando(); setChatEstado("idle");
@@ -3165,11 +3180,12 @@ async function onArquivo(e){
   const ehPlan=f=>/\.(csv|xlsx|xls)$/i.test(f.name||"")||/csv|excel|spreadsheet/.test(f.type||"");
   status(`Lendo ${ok.length} arquivo(s)…`,false);
   let itens=[];
-  for(const f of ok){
+  for(let fi=0; fi<ok.length; fi++){
+    const f=ok[fi];
+    const marcar=arr=>{ (arr||[]).forEach(x=>{ if(x) x._src=fi; }); return arr||[]; };
     try{
-      if(ehPlan(f)) itens=itens.concat(await lerPlanilha(f));
-      else if(cfg.funcaoUrl){ const r=await lerImagemOuPdf(f); itens=itens.concat(r.itens); if(!r.itens.length&&r.erro) status("Falha ao ler um arquivo: "+r.erro,true); }
-      else status("Para foto/PDF, ative a IA em ⚙️. Planilhas eu leio aqui mesmo.",true);
+      if(ehPlan(f)) itens=itens.concat(marcar(await lerPlanilha(f)));
+      else { const r=await lerImagemOuPdf(f); itens=itens.concat(marcar(r.itens)); if(!r.itens.length&&r.erro) status("Falha ao ler um arquivo: "+r.erro,true); }
     }catch(err){}
   }
   itens=dedupLote(itens);
