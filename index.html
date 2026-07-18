@@ -1702,33 +1702,106 @@ function lancamentosDoTexto(q){
 function h(x){ return String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 let chatProposta=null;
 let ultimosLancamentos=[]; // resumo do que foi incluído nesta conversa (p/ "você incluiu?")
+function valorItemProp(it){
+  if(it._receita) return +it.valor||0;
+  return it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
+}
+let propMsg=null;
+// Painel de conferência: soma total (para bater com a fatura), seleção por item
+// e edição da classificação ali mesmo — sem precisar ir na aba Despesas.
+function propostaHTML(){
+  const its=chatProposta||[];
+  const n=its.length;
+  const sel=its.filter(x=>x._sel);
+  const somaTudo=its.reduce((a,x)=>a+valorItemProp(x),0);
+  const somaSel=sel.reduce((a,x)=>a+valorItemProp(x),0);
+  const somaDesp=sel.filter(x=>!x._receita).reduce((a,x)=>a+valorItemProp(x),0);
+  const somaRec=sel.filter(x=>x._receita).reduce((a,x)=>a+valorItemProp(x),0);
+  const nDup=its.filter(x=>x._dup).length;
+  const nPar=sel.filter(x=>!x._receita&&x.natureza==="parcela").length;
+  const todos=its.every(x=>x._sel);
+
+  const linhas=its.map((it,i)=>{
+    const v=valorItemProp(it);
+    const dup=it._dup?`<span style="background:#FFF3E0;color:#B4632A;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:7px">já lançado</span>`:"";
+    const meio = it._receita
+      ? `<span style="font-size:11px;color:var(--emerald);font-weight:700">💰 receita ${it.recorrente?"· todo mês":"· "+mesLabelIdx(it.mesIdx)}</span>`
+      : `<select onchange="_g.propNat(${i},this.value)" style="font-size:11px;padding:3px 5px;border-radius:7px;border:1px solid #dde3e9;background:#fff;color:#41506b;max-width:118px">
+           ${Object.keys(NAT_LABEL).map(k=>`<option value="${k}" ${it.natureza===k?"selected":""}>${NAT_LABEL[k].split(" ")[0]}</option>`).join("")}
+         </select>
+         ${it.natureza==="parcela"?`<span style="font-size:10.5px;color:#8895a5">restam <input type="number" min="1" max="60" value="${+it.restam||1}" onchange="_g.propRestam(${i},this.value)" style="width:42px;font-size:11px;padding:2px 4px;border:1px solid #dde3e9;border-radius:6px;text-align:center">x</span>`:""}`;
+    return `<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px solid #eef1f4;${it._sel?"":"opacity:.45"}">
+      <input type="checkbox" ${it._sel?"checked":""} onchange="_g.propSel(${i},this.checked)" style="width:19px;height:19px;flex:none;margin-top:1px;accent-color:#0E7A55">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <span style="font-size:12.5px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${h(it.nome)}</span>
+          <b style="font-size:12.5px;white-space:nowrap;color:${it._receita?"var(--emerald)":"var(--ink)"}">${it._receita?"+":""}${fmtV(v)}</b>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">${meio}${dup}</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  const avisoDup=nDup?`<div style="font-size:11px;color:#B4632A;margin-top:6px">⚠️ ${nDup} ${nDup===1?"item já parece lançado e veio desmarcado":"itens já parecem lançados e vieram desmarcados"} — marque se quiser incluir mesmo assim.</div>`:"";
+
+  return `<div style="font-size:13.5px;font-weight:700;margin-bottom:2px">Encontrei ${n} ${n===1?"lançamento":"lançamentos"}</div>
+    <div style="background:var(--greenSoft);border:1px solid #BFE0D2;border-radius:11px;padding:9px 11px;margin:8px 0 4px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#0E7A55"><span>soma de tudo que li</span><b>${fmtV(somaTudo)}</b></div>
+      <div style="font-size:10.5px;color:#5b7a6d;margin-top:3px">confira com o total da fatura antes de incluir 👇</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 0">
+      <span style="font-size:11px;color:#8895a5">toque para desmarcar ou trocar o tipo</span>
+      <button onclick="_g.propTodos(${todos?0:1})" style="background:none;border:1px solid #cfd6dd;color:#41506b;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px">${todos?"desmarcar todos":"marcar todos"}</button>
+    </div>
+    <div style="max-height:290px;overflow-y:auto;margin-top:2px;-webkit-overflow-scrolling:touch">${linhas}</div>
+    ${avisoDup}
+    <div style="border-top:2px solid #e6ebf0;margin-top:10px;padding-top:9px">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#41506b">selecionados</span><b>${sel.length}/${n} · ${fmtV(somaSel)}</b></div>
+      ${somaRec>0?`<div style="display:flex;justify-content:space-between;font-size:11.5px;color:#8895a5;margin-top:3px"><span>despesas ${fmtV(somaDesp)}</span><span style="color:var(--emerald)">receitas +${fmtV(somaRec)}</span></div>`:""}
+      ${nPar?`<div style="font-size:11px;color:#8895a5;margin-top:3px">${nPar} ${nPar===1?"parcela vai se repetir":"parcelas vão se repetir"} nos próximos meses</div>`:""}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button onclick="_g.chatIncluirProposta()" ${sel.length?"":"disabled"} style="flex:1;background:${sel.length?"var(--emerald)":"#c9d3da"};border:none;color:#fff;font-weight:700;font-size:13px;padding:10px;border-radius:9px">incluir ${sel.length} ${sel.length===1?"item":"itens"}</button>
+      <button onclick="_g.chatDescartarProposta()" style="background:none;border:1px solid #cfd6dd;color:#8895a5;font-weight:700;font-size:13px;padding:10px 12px;border-radius:9px">descartar</button>
+    </div>`;
+}
+function propRefresh(){
+  const box=document.getElementById("propBox");
+  const html=propostaHTML();
+  if(box) box.innerHTML=html;
+  if(propMsg) propMsg.html=`<div id="propBox">${html}</div>`;   // mantém ao re-renderizar o chat
+}
+G.propSel=(i,v)=>{ if(chatProposta&&chatProposta[i]){ chatProposta[i]._sel=!!v; propRefresh(); } };
+G.propTodos=(v)=>{ (chatProposta||[]).forEach(x=>x._sel=!!v); propRefresh(); };
+G.propNat=(i,nat)=>{
+  const it=chatProposta&&chatProposta[i]; if(!it) return;
+  it.natureza=nat;
+  if(nat==="parcela"){ if(!(+it.restam>0)) it.restam=2; it.total=(+it.valor||0)*(+it.restam||1); }
+  else { delete it.restam; delete it.total; if(nat==="eventual"&&it.mesIdx==null) it.mesIdx=0;
+         if(nat==="estimada"&&!(it.min>0)){ const v=+it.valor||0; it.min=Math.round(v*0.8); it.max=Math.round(v*1.2); } }
+  propRefresh();
+};
+G.propRestam=(i,v)=>{
+  const it=chatProposta&&chatProposta[i]; if(!it) return;
+  it.restam=Math.max(1,Math.min(60,parseInt(v,10)||1));
+  it.total=(+it.valor||0)*it.restam;
+  propRefresh();
+};
 function propostaChat(itens){
   // aceita despesas (com natureza) e receitas (com _receita); marca duplicados
-  chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); o._dup=ehDuplicado(o); return o; });
-  const linhas=chatProposta.map(it=>{
-    const dup=it._dup?` <span style="background:#FFF3E0;color:#B4632A;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">⚠️ já lançado</span>`:"";
-    if(it._receita){
-      const quando = it.recorrente ? "todo mês" : mesLabelIdx(it.mesIdx);
-      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>💰 ${h(it.nome)}${dup} <span style="color:#8aa2ad;font-size:11px">·receita ${quando}</span></span><b style="color:var(--emerald)">+${fmtV(it.valor)}</b></div>`;
-    }
-    const v = it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
-    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0"><span>${h(it.nome)}${dup} <span style="color:#8aa2ad;font-size:11px">·${NAT_LABEL[it.natureza].split(" ")[0]}</span></span><b>${fmtV(v)}</b></div>`;
-  }).join("");
-  const n=chatProposta.length, nDup=chatProposta.filter(x=>x._dup).length;
-  const avisoDup=nDup?`<div style="font-size:11.5px;color:#B4632A;margin-top:6px">⚠️ ${nDup} ${nDup===1?'item parece':'itens parecem'} já lançado(s) — vou <b>ignorar</b> ao incluir, para evitar duplicidade. Se for cobrança nova mesmo, me diga "incluir mesmo assim".</div>`:"";
-  const html=`Encontrei <b>${n}</b> ${n===1?'lançamento':'lançamentos'}:<div style="margin:6px 0 4px">${linhas}</div>${avisoDup}
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button onclick="_g.chatIncluirProposta()" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:13px;padding:9px;border-radius:9px">incluir ${n===1?'':'tudo'}</button>
-      <button onclick="_g.chatDescartarProposta()" style="background:none;border:1px solid #cfd6dd;color:#8895a5;font-weight:700;font-size:13px;padding:9px 12px;border-radius:9px">descartar</button>
-    </div>
-    <div style="font-size:11px;color:#8895a5;margin-top:6px">Depois é só ajustar na aba Despesas ou ➕ Adicionar.</div>`;
-  const m={de:"ia", html}; chatMsgs.push(m); appendChatBubble(m);
+  // e já vem tudo selecionado, exceto o que parece repetido
+  chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); o._dup=ehDuplicado(o); o._sel=!o._dup; return o; });
+  propMsg={de:"ia", html:`<div id="propBox">${propostaHTML()}</div>`};
+  chatMsgs.push(propMsg); appendChatBubble(propMsg);
 }
+
 G.chatIncluirProposta=(forcar)=>{
   if(!chatProposta||!chatProposta.length) return;
-  const linhas=[]; let nd=0,nr=0,pulados=0;
+  if(forcar) chatProposta.forEach(x=>{ if(x._dup) x._sel=true; });
+  const linhas=[]; let nd=0,nr=0,pulados=0,somaInc=0;
   chatProposta.forEach((it,k)=>{
-    if(it._dup && !forcar){ pulados++; return; }
+    if(!it._sel){ pulados++; return; }
+    somaInc+=valorItemProp(it);
     if(it._receita){
       state.receitas=state.receitas||[];
       state.receitas.push({id:"r"+Date.now()+"_"+k,nome:it.nome,valor:it.valor,mesIdx:it.recorrente?0:(+it.mesIdx||0),recorrente:!!it.recorrente,cat:"Receita"});
@@ -1744,9 +1817,10 @@ G.chatIncluirProposta=(forcar)=>{
       ultimosLancamentos.push(`${h(nome)} — ${fmtV(v)} (${det})`);
     }
   });
-  const notaDup=pulados?`<div style="font-size:11.5px;color:#B4632A;margin-top:6px">↷ ${pulados} ${pulados===1?'item ignorado':'itens ignorados'} por já existirem. Para incluir assim mesmo, diga <i>"incluir mesmo assim"</i>.</div>`:"";
-  if(!linhas.length && pulados){ const m={de:"ia", html:`Todos os ${pulados} itens já estavam lançados — não dupliquei nada. ✅${notaDup}`}; chatMsgs.push(m); appendChatBubble(m); chatProposta=chatProposta.filter(x=>x._dup); return; }
-  chatProposta = pulados ? chatProposta.filter(x=>x._dup) : null;
+  const notaDup=pulados?`<div style="font-size:11.5px;color:#8895a5;margin-top:6px">↷ ${pulados} ${pulados===1?'item não foi incluído (desmarcado)':'itens não foram incluídos (desmarcados)'}.</div>`:"";
+  if(!linhas.length){ const m={de:"ia", html:`Nenhum item estava marcado — não incluí nada. Marque os que quiser e toque em <b>incluir</b>. ✅`}; chatMsgs.push(m); appendChatBubble(m); return; }
+  chatProposta = pulados ? chatProposta.filter(x=>!x._sel) : null;
+  propMsg=null;
   filtroDesp="todos";     // garante que os novos itens apareçam na lista de Despesas
   salvar(); render();      // ATUALIZA o app por trás do chat (Despesas, Projeção e gráfico)
   // efeito no mês, com tom acolhedor (gap ou sobra geram sentimento — acolher, não alarmar)
@@ -1758,12 +1832,19 @@ G.chatIncluirProposta=(forcar)=>{
     ${nd?`<button onclick="_g.irParaDe('despesas')" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver em Despesas</button>`:''}
     ${(nr||nd)?`<button onclick="_g.irParaDe('proj')" style="flex:1;background:#fff;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver na Projeção</button>`:''}
   </div>`;
-  const m={de:"ia", html:`Pronto! Incluí e já atualizei o app. Veja onde cada item entrou:<div style="margin:8px 0 2px;line-height:1.7">${linhas.join("<br>")}</div>${notaDup}${efeito}${botoes}`};
+  const resumoInc=`<div style="background:var(--greenSoft);border:1px solid #BFE0D2;border-radius:11px;padding:9px 11px;margin:8px 0 6px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#0E7A55"><span><b>${nd+nr}</b> ${(nd+nr)===1?'lançamento incluído':'lançamentos incluídos'}</span><b>${fmtV(somaInc)}</b></div>
+      ${nd&&nr?`<div style="font-size:10.5px;color:#5b7a6d;margin-top:3px">${nd} despesa(s) · ${nr} receita(s)</div>`:""}
+    </div>`;
+  const lista=linhas.length>8
+    ? `<details style="margin:2px 0"><summary style="font-size:12px;color:#41506b;cursor:pointer">ver os ${linhas.length} itens incluídos</summary><div style="margin-top:6px;line-height:1.7">${linhas.join("<br>")}</div></details>`
+    : `<div style="margin:8px 0 2px;line-height:1.7">${linhas.join("<br>")}</div>`;
+  const m={de:"ia", html:`Pronto! Incluí e já atualizei o app.${resumoInc}${lista}${notaDup}${efeito}${botoes}`};
   chatMsgs.push(m); appendChatBubble(m);
 };
 G.irParaDe=(t)=>{ filtroDesp="todos"; G.fecharChat(); G.setTab(t); };
 G.chatDescartarProposta=()=>{
-  chatProposta=null;
+  chatProposta=null; propMsg=null;
   const m={de:"ia", html:"Ok, descartei. Se quiser, me mande de novo ou digite manualmente."};
   chatMsgs.push(m); appendChatBubble(m);
 };
