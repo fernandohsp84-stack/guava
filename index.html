@@ -1863,8 +1863,11 @@ function posProcessarFatura(itens){
     let nome=String(raw.nome||raw.descricao||raw.nome_item||"").trim();
     let valor=parseMoeda(raw.valor!=null?raw.valor:raw.total);
     if(!(valor>0)) continue;
-    // linhas que não são gasto do usuário
+    // linhas que não são gasto do usuário (inclui o RESUMO da fatura, que a
+    // leitura por imagem às vezes devolve como se fosse lançamento)
     if(/ajuste|estorno|pagamento receb|pagto|cr[ée]d(?:ito)? parc|juros|multa|anuidade estornada|saldo|total/i.test(nome)) continue;
+    if(/^(compras (?:nacionais|internacionais|parceladas)|tarifas|encargos|limite|valor (?:total|da fatura)|pagamentos?\/?cr[ée]ditos|resumo|futuras|fatura anterior|iof)\b/i.test(nome.trim())) continue;
+    if(/^r\$\s*[\d.,]+$/i.test(nome.trim())) continue;   // "nome" que é só um valor (ex.: "R$ 7.178,23")
     nome=nome.replace(/^\d{1,2}\/\d{1,2}\s+/,"");            // data "13/06 " no início
     let natureza=raw.natureza||"eventual", restam=raw.restam, total=raw.total;
     // padrão de parcela no fim: "04 06" ou "04/06" ou "PARC 04/06"
@@ -1875,7 +1878,7 @@ function posProcessarFatura(itens){
         natureza="parcela";
         restam=tot-atual+1;              // inclui a parcela desta fatura
         total=valor*tot;
-        nome=nome.replace(mp[0],"").trim();
+        nome=nome.replace(mp[0],"").replace(/\s*\bparc\.?\s*$/i,"").trim();
       }
     }
     nome=nome.replace(/\s{2,}/g," ").trim();
@@ -1941,8 +1944,23 @@ async function extrairTextoPDF(file){
 function parseLinhasFatura(linhas){
   const out=[];
   const IGNORAR=/saldo|pagamento|pagto|ajuste|iof\b|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|juros|multa|mora\b|limite|vencimento|\bcet\b|anuidade|estorno|cr[ée]dito rotativo|parcelamento da fatura|d[óo]lar|peso argentino|us\$|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers/i;
+  // Linhas do RESUMO da fatura (nunca são lançamentos individuais)
+  const RESUMO=/^(resumo|compras nacionais|compras internacionais|tarifas|saldo parcelado|saldo fatura|pagamentos?\/?cr[ée]ditos|compras parceladas|total (?:compras|final|da fatura|nacional|internacional)|valor total|valor da fatura|limite|encargos|iof|juros)\b/i;
+  // Só consideramos "área de lançamentos" após um cabeçalho como
+  // "Lançamentos nesta fatura" / "Movimentação nacional" / "Data Descrição ... Valor".
+  const INICIO=/lan[çc]amentos nesta fatura|movimenta[çc][ãa]o (?:nacional|internacional)|^data\s+descri|compras \(cart|demonstrativo/i;
+  const FIM=/opções de pagamento|informações complementares|conhe[çc]a os benef|fale conosco|programa de pontos|guia de consumo/i;
+  let dentro=false, jaViuInicio=false;
   for(let L of linhas){
-    if(!L || L.length<6) continue;
+    if(!L) continue;
+    if(INICIO.test(L)){ dentro=true; jaViuInicio=true; continue; }
+    if(dentro && FIM.test(L)){ dentro=false; continue; }
+    // enquanto não apareceu nenhum cabeçalho de lançamentos, ignoramos tudo
+    // (é onde mora o "Resumo da fatura")
+    if(!jaViuInicio) continue;
+    if(!dentro) continue;
+    if(L.length<6) continue;
+    if(RESUMO.test(L.trim())) continue;      // linha de resumo dentro da área
     if(IGNORAR.test(L)) continue;
     // valor no fim: 1.234,56 ou 123,45, sufixo opcional D (débito) / C (crédito)
     const mv=L.match(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC])?\s*$/);
