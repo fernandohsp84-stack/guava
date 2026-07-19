@@ -162,7 +162,7 @@ const FUNCAO_URL_PADRAO = "https://southamerica-east1-guava-app-513a0.cloudfunct
 // ====================================================================
 
 // ---------- estado ----------
-let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[],objetivos:[],nome:""};
+let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[],objetivos:[],nome:"",cardDash:"proj3"};
 let cfg={firebase:{
   apiKey:"AIzaSyDOEAOM9wRi1dUWLTMkxtvjpluEjaY2bCU",
   authDomain:"guava-app-513a0.firebaseapp.com",
@@ -903,13 +903,8 @@ function viewInicio(){
   const semBackend=!cfg.funcaoUrl;
   const esc=calcularEscore(p,state.renda,state.metaPct);
   const rend=(state.metaPct*100);
-  const frac=state.horizonte===18?1:0.62;
   return `<div style="background:linear-gradient(180deg,#14532D 0%,#0F4A38 62%,#0D3E44 100%);margin:0 -14px;padding:2px 14px 16px;border-radius:0 0 26px 26px;box-shadow:0 12px 26px rgba(15,74,56,.28)">
     <div style="padding:2px 2px 12px">
-      <div style="height:5px;border-radius:3px;background:rgba(255,255,255,.22);position:relative;margin:8px 0 10px">
-        <div style="position:absolute;left:0;top:0;bottom:0;width:${frac*100}%;background:linear-gradient(90deg,#7DE8D2,#3FD9BC);border-radius:3px"></div>
-        <div style="position:absolute;top:50%;left:${frac*100}%;transform:translate(-50%,-50%);width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.45)"></div>
-      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <span style="font-size:12px;font-weight:${state.horizonte===12?800:500};color:${state.horizonte===12?'#fff':'#BEE3CC'}">Visão Atual: 12 meses</span>
         <button onclick="_g.setHor(${state.horizonte===12?18:12})" aria-label="alternar horizonte" style="width:46px;height:26px;border-radius:20px;border:none;background:${state.horizonte===18?'#3FD9BC':'rgba(255,255,255,.28)'};position:relative;padding:0;transition:background .2s;flex:none">
@@ -933,14 +928,7 @@ function viewInicio(){
         <div style="font-size:26px;font-weight:800;color:#fff;margin-top:10px;letter-spacing:-.5px">${fmt(disponivel)}</div>
         <div style="font-size:10.5px;color:#9FC3D6;margin-top:2px">de ${fmt(rendaMesAtual)} de renda${m.extra>0?` <span style="color:#FFD98A">· +${fmt(m.extra)} extra</span>`:""}</div>
       </div>
-      <div class="card" style="background:linear-gradient(160deg,#A9C4E8 0%,#7FA3D6 100%);border:none;color:#fff;padding:16px 14px;position:relative;overflow:hidden;border-radius:22px;box-shadow:0 10px 26px rgba(127,163,214,.4)">
-        <div style="font-size:14px;font-weight:700;color:#fff">Metas de Poupança</div>
-        <div style="display:flex;justify-content:flex-end;margin-top:2px">${svgNotebook()}</div>
-        <div class="barTrack" style="height:9px;background:#16324E;margin-top:8px">
-          <div style="width:${Math.min(guardadoAlvo/Math.max(state.renda*0.3,1)*100,100)}%;height:100%;border-radius:8px;background:linear-gradient(90deg,#7DE8D2,#3FD9BC)"></div>
-        </div>
-        <div style="margin-top:8px"><span style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-.5px">${fmt(guardadoAlvo)}</span> <span style="font-size:11px;color:#EAF2FF">(${rend.toFixed(0)}% da Renda)</span></div>
-      </div>
+      ${cardDashSelecionavel(p, guardadoAlvo, rend)}
     </div>
     ${cardGuavAICentral(esc)}
     <div class="card">
@@ -967,6 +955,84 @@ function viewInicio(){
     ${cardIncentivos()}
     ${semBackend?`<div style="font-size:12px;color:var(--cyan);text-align:center;padding:4px 10px 12px">💡 Texto e voz já funcionam. Para foto/PDF e sincronizar, toque em ⚙️ Configurar.</div>`:""}
   </div>`;
+}
+
+// ===== Card configurável do dashboard =====
+// O usuário escolhe o que quer ver ao lado de "Disponível p/ gastar":
+// projeção dos próximos 3 meses, a meta de poupança ou um objetivo.
+const DASH_VIEWS=[["proj3","Próximos 3 meses"],["meta","Metas de Poupança"],["objetivo","Meu objetivo"]];
+G.cicloCardDash=()=>{
+  const i=DASH_VIEWS.findIndex(v=>v[0]===(state.cardDash||"proj3"));
+  state.cardDash=DASH_VIEWS[(i+1)%DASH_VIEWS.length][0];
+  salvar(); render();
+};
+function molduraDash(titulo,corpo){
+  return `<div class="card" style="background:linear-gradient(160deg,#A9C4E8 0%,#7FA3D6 100%);border:none;color:#fff;padding:14px 13px;position:relative;overflow:hidden;border-radius:22px;box-shadow:0 10px 26px rgba(127,163,214,.4);display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">
+      <div style="font-size:13.5px;font-weight:700;color:#fff;line-height:1.2">${titulo}</div>
+      <button onclick="_g.cicloCardDash()" aria-label="trocar visão do card" style="flex:none;width:24px;height:24px;border-radius:50%;border:none;background:rgba(255,255,255,.25);color:#fff;font-size:12px;line-height:1;padding:0">⇄</button>
+    </div>
+    ${corpo}
+  </div>`;
+}
+// mini gráfico empilhado dos próximos 3 meses (mesma leitura da aba Projeção)
+function cardProx3(p){
+  const ms=p.slice(0,3);
+  const maxV=Math.max(...ms.map(x=>Math.max(x.total,(x.rendaMes||state.renda))),1);
+  const soma=ms.reduce((a,x)=>a+x.total,0);
+  const estouros=ms.filter(x=>x.total>(x.rendaMes||state.renda)).length;
+  const seg=(v,cor)=>v>0?`<div style="height:${(v/maxV*100).toFixed(1)}%;background:${cor}"></div>`:"";
+  const barras=ms.map(x=>{
+    const rendaPct=((x.rendaMes||state.renda)/maxV*100).toFixed(1);
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0">
+      <div style="position:relative;width:100%;height:58px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.22);display:flex;flex-direction:column-reverse">
+        ${seg(x.fixo,"#241A45")}${seg(x.estimado,"#2E9E8F")}${seg(x.eventual,"#4B5FD6")}${seg(x.parcela,"#E5486B")}
+        <div style="position:absolute;left:0;right:0;bottom:${rendaPct}%;height:0;border-top:1.5px dashed rgba(255,255,255,.85)"></div>
+      </div>
+      <div style="font-size:9.5px;color:#EAF2FF;font-weight:700">${x.mes}</div>
+    </div>`;
+  }).join("");
+  const corpo=`<div style="display:flex;gap:5px;align-items:flex-end;margin-top:9px">${barras}</div>
+    <div style="margin-top:8px"><span style="font-size:19px;font-weight:800;color:#fff;letter-spacing:-.4px">${fmt(soma)}</span></div>
+    <div style="font-size:9.5px;color:#EAF2FF;line-height:1.35">gastos previstos ${estouros?`· <b style="color:#FFD9E0">${estouros} acima da renda</b>`:"· dentro da renda 🌿"}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;font-size:8px;color:#EAF2FF">
+      <span>■ <span style="color:#241A45">▉</span> fixas</span><span><span style="color:#2E9E8F">▉</span> estim.</span><span><span style="color:#4B5FD6">▉</span> event.</span><span><span style="color:#E5486B">▉</span> parc.</span>
+    </div>`;
+  return molduraDash("Próximos 3 meses",corpo);
+}
+function cardMetaPoupanca(guardadoAlvo,rend){
+  const corpo=`<div style="display:flex;justify-content:flex-end;margin-top:2px">${svgNotebook()}</div>
+    <div class="barTrack" style="height:9px;background:#16324E;margin-top:8px">
+      <div style="width:${Math.min(guardadoAlvo/Math.max(state.renda*0.3,1)*100,100)}%;height:100%;border-radius:8px;background:linear-gradient(90deg,#7DE8D2,#3FD9BC)"></div>
+    </div>
+    <div style="margin-top:8px"><span style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-.5px">${fmt(guardadoAlvo)}</span> <span style="font-size:11px;color:#EAF2FF">(${rend.toFixed(0)}% da Renda)</span></div>`;
+  return molduraDash("Metas de Poupança",corpo);
+}
+function cardObjetivoDash(){
+  const objs=state.objetivos||[];
+  if(!objs.length){
+    return molduraDash("Meu objetivo",`<div style="font-size:11.5px;color:#EAF2FF;line-height:1.45;margin-top:10px">Você ainda não criou um objetivo (viagem, carro, reserva...).</div>
+      <button onclick="_g.setTab('metas')" style="margin-top:10px;background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;font-size:11.5px;padding:8px;border-radius:10px;width:100%">criar em Metas</button>`);
+  }
+  const o=objs[0];
+  const a=apreciarObjetivo(o);
+  const pct=Math.max(0,Math.min(a.pct||0,1));
+  const corpo=`<div style="font-size:11.5px;color:#EAF2FF;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${h(o.titulo||"Objetivo")}</div>
+    <div style="position:relative;height:30px;margin-top:6px">
+      <div style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:9px;border-radius:8px;background:#16324E;overflow:hidden">
+        <div style="width:${(pct*100).toFixed(0)}%;height:100%;background:linear-gradient(90deg,#7DE8D2,#3FD9BC)"></div>
+      </div>
+      <div style="position:absolute;left:${(pct*100).toFixed(0)}%;top:50%;transform:translate(-50%,-50%)">${orbeGuavAI(pct>=0.66?"happy":pct>=0.33?"listening":"idle",26,"orbeDash")}</div>
+    </div>
+    <div style="margin-top:6px"><span style="font-size:20px;font-weight:800;color:#fff;letter-spacing:-.4px">${(pct*100).toFixed(0)}%</span> <span style="font-size:10.5px;color:#EAF2FF">de ${fmt(o.alvo||0)}</span></div>
+    ${objs.length>1?`<div style="font-size:9.5px;color:#EAF2FF;margin-top:3px">+${objs.length-1} outro(s) em Metas</div>`:""}`;
+  return molduraDash("Meu objetivo",corpo);
+}
+function cardDashSelecionavel(p, guardadoAlvo, rend){
+  const v=state.cardDash||"proj3";
+  if(v==="meta") return cardMetaPoupanca(guardadoAlvo,rend);
+  if(v==="objetivo") return cardObjetivoDash();
+  return cardProx3(p);
 }
 
 // GuavAI — apresentação central: nome ACIMA, mascote maior (proporcional aos
@@ -1706,7 +1772,7 @@ function valorItemProp(it){
   if(it._receita) return +it.valor||0;
   return it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
 }
-let propMsg=null;
+let propMsg=null; let propCreditos=null;
 // Painel de conferência: soma total (para bater com a fatura), seleção por item
 // e edição da classificação ali mesmo — sem precisar ir na aba Despesas.
 function propostaHTML(){
@@ -1747,7 +1813,8 @@ function propostaHTML(){
   return `<div style="font-size:13.5px;font-weight:700;margin-bottom:2px">Encontrei ${n} ${n===1?"lançamento":"lançamentos"}</div>
     <div style="background:var(--greenSoft);border:1px solid #BFE0D2;border-radius:11px;padding:9px 11px;margin:8px 0 4px">
       <div style="display:flex;justify-content:space-between;font-size:12px;color:#0E7A55"><span>soma de tudo que li</span><b>${fmtV(somaTudo)}</b></div>
-      <div style="font-size:10.5px;color:#5b7a6d;margin-top:3px">confira com o total da fatura antes de incluir 👇</div>
+      <div style="font-size:10.5px;color:#5b7a6d;margin-top:3px">${propCreditos?"= suas <b>compras</b> desta fatura":"confira com o total da fatura antes de incluir 👇"}</div>
+      ${propCreditos?`<div style="font-size:10.5px;color:#5b7a6d;margin-top:6px;padding-top:6px;border-top:1px dashed #BFE0D2">↷ deixei de fora <b>${propCreditos.n}</b> linha(s) de pagamento/crédito/estorno. Se sua fatura abate pagamentos do mês anterior, o <b>total impresso será menor</b> que esta soma — o que importa aqui são as compras.</div>`:""}
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 0">
       <span style="font-size:11px;color:#8895a5">toque para desmarcar ou trocar o tipo</span>
@@ -1787,7 +1854,8 @@ G.propRestam=(i,v)=>{
   it.total=(+it.valor||0)*it.restam;
   propRefresh();
 };
-function propostaChat(itens){
+function propostaChat(itens, creditos){
+  propCreditos = creditos && creditos.soma>0 ? creditos : null;
   // aceita despesas (com natureza) e receitas (com _receita); marca duplicados
   // e já vem tudo selecionado, exceto o que parece repetido
   chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); delete o._src; o._dup=ehDuplicado(o); o._sel=!o._dup; return o; });
@@ -1948,7 +2016,8 @@ function posProcessarFatura(itens){
     // leitura por imagem às vezes devolve como se fosse lançamento)
     if(/ajuste|estorno|pagamento receb|pagto|\bpgto\.?|obrigado pelo pag|cr[ée]d(?:ito)? parc|juros|multa|anuidade (?:isent|estornad)|saldo|total/i.test(nome)) continue;
     if((raw.valor!=null && String(raw.valor).trim().startsWith("-")) || (+raw.valor<0)) continue;  // crédito
-    if(/^(compras (?:nacionais|internacionais|parceladas)|tarifas|encargos|limite|valor (?:total|da fatura)|pagamentos?\/?cr[ée]ditos|resumo|futuras|fatura anterior|iof)\b/i.test(nome.trim())) continue;
+    if(/^(compras (?:nacionais|internacionais|parceladas)|tarifas|encargos|limite|valor (?:total|da fatura)|pagamentos?\/?cr[ée]ditos|resumo|futuras|fatura anterior)\b/i.test(nome.trim())) continue;
+    if(/^iof\b/i.test(nome.trim()) && !/compra|internacional/i.test(nome)) continue;   // "IOF nesta fatura" (resumo) sim; "IOF COMPRA INTERNACIONAL" é despesa
     if(/^r\$\s*[\d.,]+$/i.test(nome.trim())) continue;   // "nome" que é só um valor (ex.: "R$ 7.178,23")
     nome=nome.replace(/^\d{1,2}\/\d{1,2}\s+/,"");            // data "13/06 " no início
     let natureza=raw.natureza||"eventual", restam=raw.restam, total=raw.total;
@@ -2036,9 +2105,15 @@ async function extrairTextoPDF(file){
   return linhas;
 }
 // interpreta linhas de fatura (BB, CAIXA, Nubank...): "DD/MM DESCRIÇÃO ... 1.234,56 [D|C]"
+let ultimoCredito={n:0,soma:0};
 function parseLinhasFatura(linhas){
-  const out=[];
-  const IGNORAR=/saldo|pagamento|pagto|\bpgto\.?|obrigado pelo pag|ajuste|iof\b|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|juros|multa|mora\b|limite|vencimento|\bcet\b|anuidade (?:isent|estornad|diferenciada gratuita)|estorno|cr[ée]dito rotativo|parcelamento da fatura|d[óo]lar|peso argentino|us\$|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers/i;
+  const out=[]; ultimoCredito={n:0,soma:0};
+  // ruído estrutural do documento — nunca é lançamento, em qualquer situação
+  const ESTRUTURAL=/saldo|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|limite|vencimento|\bcet\b|d[óo]lar|peso argentino|us\$|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers|parcelamento da fatura|cr[ée]dito rotativo/i;
+  // termos que SUGEREM crédito/pagamento — só valem quando a linha NÃO está
+  // marcada como débito. "PAGAMENTO*MBB ... 300,96D" é um estabelecimento, não
+  // um pagamento de fatura; o marcador D/C do banco tem a palavra final.
+  const SUSPEITAS=/pagamento|pagto|\bpgto\.?|obrigado pelo pag|ajuste|estorno|\biof\b|juros|multa|\bmora\b|anuidade (?:isent|estornad)/i;
   // Linhas do RESUMO da fatura (nunca são lançamentos individuais)
   const RESUMO=/^(resumo|compras nacionais|compras internacionais|tarifas|saldo parcelado|saldo fatura|pagamentos?\/?cr[ée]ditos|compras parceladas|total (?:compras|final|da fatura|nacional|internacional)|valor total|valor da fatura|limite|encargos|iof|juros)\b/i;
   // Só consideramos "área de lançamentos" após um cabeçalho como
@@ -2056,15 +2131,18 @@ function parseLinhasFatura(linhas){
     if(!dentro) continue;
     if(L.length<6) continue;
     if(RESUMO.test(L.trim())) continue;      // linha de resumo dentro da área
-    if(IGNORAR.test(L)) continue;
+    if(ESTRUTURAL.test(L)) continue;
     // valor no fim: 1.234,56 ou 123,45, sufixo opcional D (débito) / C (crédito)
     const mv=L.match(/(?:R\$\s*)?(-?)\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC\-])?\s*$/);
     if(!mv) continue;
+    const vLinha=parseMoeda(mv[2]);
     // crédito/estorno/pagamento: sinal negativo antes ou depois, sufixo "C",
     // ou valor entre parênteses — nada disso é gasto do usuário
     const ehCred = mv[1]==="-" || mv[3]==="C" || mv[3]==="-" || /\(\s*[\d.,]+\s*\)\s*$/.test(L) || /R\$\s*[-–−]/.test(L);
-    if(ehCred) continue;
-    const valor=parseMoeda(mv[2]);
+    if(ehCred){ if(vLinha>0){ ultimoCredito.n++; ultimoCredito.soma+=vLinha; } continue; }
+    const ehDebito = mv[3]==="D";            // marcador explícito do extrato
+    if(!ehDebito && SUSPEITAS.test(L)){ if(vLinha>0){ ultimoCredito.n++; ultimoCredito.soma+=vLinha; } continue; }
+    const valor=vLinha;
     if(!(valor>0) || valor>200000) continue;
     let desc=L.slice(0,mv.index).trim();
     desc=desc.replace(/^[^A-Za-z0-9]*\d{2}\/\d{2}(?:\/\d{2,4})?\s*/,"");  // data inicial
@@ -2097,7 +2175,7 @@ async function lerImagemOuPdf(file){
           if(x.parcelaTotal>=2 && x.parcelaAtual>=1) return {nome:x.nome, valor:x.valor, natureza:"parcela", restam:x.parcelaTotal-x.parcelaAtual+1, total:x.valor*x.parcelaTotal};
           return {nome:x.nome, valor:x.valor};
         }));
-        if(itens.length) return {itens, erro:null};
+        if(itens.length) return {itens, erro:null, creditos:{...ultimoCredito}};
         if(linhas.join(" ").length>400) return {itens:[], erro:"li o PDF mas não achei linhas de lançamento no padrão de fatura"};
       }
     }catch(e){ /* segue para a nuvem */ }
@@ -2157,19 +2235,19 @@ async function onChatArquivo(e){
   const rot=ok.map(f=>ehPlan(f)?"📊":f.type==="application/pdf"?"📄":"🖼️").join(" ");
   const um={de:"user", html:`📎 ${ok.length} arquivo(s) enviados ${rot}`}; chatMsgs.push(um); appendChatBubble(um);
   setChatEstado("computing"); mostrarDigitando();
-  let itens=[]; let falhas=0; let ultimoErroArq=null;
+  let itens=[]; let falhas=0; let ultimoErroArq=null; let credLote={n:0,soma:0};
   for(let fi=0; fi<ok.length; fi++){
     const f=ok[fi];
     const marcar=arr=>{ (arr||[]).forEach(x=>{ if(x) x._src=fi; }); return arr||[]; };
     try{
       if(ehPlan(f)) itens=itens.concat(marcar(await lerPlanilha(f)));
-      else { const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } itens=itens.concat(marcar(r.itens)); }
+      else { const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } if(r.creditos){ credLote.n+=r.creditos.n; credLote.soma+=r.creditos.soma; } itens=itens.concat(marcar(r.itens)); }
     }catch(err){ falhas++; if(err&&err.message) ultimoErroArq=err.message; }
   }
   itens=dedupLote(itens);
   removerDigitando(); setChatEstado("idle");
   if(!itens.length){ const det=ultimoErroArq?`<br><span style="font-size:11.5px;color:#8895a5">Detalhe técnico: ${h(ultimoErroArq)}.</span>`:""; ultimoErroArq=null; const m={de:"ia", html:`Não consegui extrair lançamentos dos arquivos${falhas?` (${falhas} falharam)`:""}.${det}<br>Dica: fotos muito longas podem cortar — envie a fatura por partes, ou me diga os itens em texto: <i>"mercado 250; luz 180"</i>.`}; chatMsgs.push(m); appendChatBubble(m); return; }
-  propostaChat(itens);
+  propostaChat(itens, credLote);
 }
 G.chatRapida=(q)=>{
   // reaproveita o motor determinístico Analise para respostas rápidas dentro do chat
