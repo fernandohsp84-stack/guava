@@ -20,6 +20,10 @@
     --line:#ECE8F4;
     --blue:#6C7FD8; --blueSoft:#EEF0FF; --green:#12A594; --greenSoft:#E6F7F2;
     --graphite:#2E1065; --graphiteSoft:#F1EDF8; --guava:#EB2A6F; --guavaSoft:#FFEAF0;
+    /* ===== Tema da conversa (alinhado ao RutAI / estilo Claude-GPT) ===== */
+    --chatBg:#FFFFFF; --chatHead:#FFFFFF; --chatLine:#ECEBE7; --chatInk:#1F2937;
+    --chatSub:#8A887F; --chatChip:#F3F3F1; --chatInput:#F3F3F1;
+    --chatIa:#FFFFFF; --chatUser:#F1F1EF; --chatUserInk:#1F2937; --chatSend:#2563EB;
     --amber:#E0922F;
     --grad-dash:linear-gradient(160deg,#14532D 0%,#0F3D2E 55%,#0A2540 100%);
     --glass:#FFFFFF;
@@ -1492,42 +1496,56 @@ G.fecharChat=()=>{
   if(recAg){ try{recAg.stop();}catch{} }
 };
 function renderChat(){
-  const [c1,c2]=ORBE_CORES[chatEstado]||ORBE_CORES.idle;
   const sugestoes=[
     ["📊 Gastos por categoria","cat"],["🍽️ Alimentação 3 meses","alim3"],
     ["💳 Quando as parcelas aliviam","parc"],["⏩ Antecipar parcelas","antec"],
   ];
   const temIA=!!cfg.funcaoUrl;
-  const orbeGrande = chatEstado!=="idle" || chatMsgs.length<=1;
-  const tamOrbe = orbeGrande ? 96 : 52;
   const baloes = chatMsgs.map(m=>baloaHTML(m)).join("");
-  const rotuloEstado = chatEstado==="listening"?"ouvindo…":chatEstado==="computing"?"pensando…":"";
-  return `<div id="chatOv" style="position:fixed;inset:0;z-index:210;background:linear-gradient(180deg,#14532D 0%,#0F3D2E 45%,#0A2540 100%);display:flex;flex-direction:column;animation:slideIn .3s">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:calc(12px + env(safe-area-inset-top)) 16px 8px">
-      <span style="color:#fff;font-weight:800;font-size:16px">GuavAI</span>
-      <button onclick="_g.fecharChat()" style="background:rgba(255,255,255,.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px">✕</button>
+  return `<div id="chatOv" style="position:fixed;inset:0;z-index:210;background:var(--chatBg);display:flex;flex-direction:column;animation:slideIn .28s">
+    <div style="display:flex;align-items:center;gap:11px;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;background:var(--chatHead)">
+      <div style="width:40px;height:40px;flex:none;border-radius:50%;padding:3px;background:conic-gradient(from 210deg,#7DE8D2,#6C7FD8,#EB2A6F,#00C49F,#7DE8D2);box-shadow:0 2px 10px rgba(108,127,216,.35);display:flex;align-items:center;justify-content:center">
+        <div style="width:100%;height:100%;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden">${orbeGuavAI(humorGuav(calcularEscore(projecao(),state.renda,state.metaPct)),30,'orbeGuavHead')}</div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:800;font-size:19px;color:#111;line-height:1.05">GuavAI</div>
+        <div id="chatRotulo" style="font-size:13px;color:var(--chatSub);line-height:1.2">seu copiloto financeiro</div>
+      </div>
+      <button onclick="_g.fecharChat()" aria-label="fechar" style="background:var(--chatChip);border:none;color:#6B6B6B;width:34px;height:34px;border-radius:50%;font-size:17px;flex:none">✕</button>
     </div>
-    <div id="chatOrbe" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:${orbeGrande?'20px':'8px'} 0;transition:padding .4s">
-      ${orbeGuavAI(chatEstado,tamOrbe,'orbeGuavChat')}
-      <div id="chatRotulo" style="color:${c2};font-size:12px;font-weight:600;margin-top:10px;letter-spacing:.3px">${rotuloEstado}</div>
-    </div>
-    <div id="chatMsgs" style="flex:1;overflow-y:auto;padding:8px 16px 12px;display:flex;flex-direction:column;gap:10px">
+    <div id="chatMsgs" style="flex:1;overflow-y:auto;padding:14px 16px 16px;display:flex;flex-direction:column;gap:18px;-webkit-overflow-scrolling:touch">
       ${baloes}
     </div>
-    ${chatMsgs.length<=1?`<div id="chatSugestoes" style="padding:0 12px 8px;display:flex;gap:7px;overflow-x:auto">${sugestoes.map(([t,q])=>`<button onclick="_g.chatRapida('${q}')" style="white-space:nowrap;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;font-size:12px;font-weight:600;padding:8px 13px;border-radius:20px">${t}</button>`).join("")}</div>`:""}
-    <div id="chatBar" style="padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:rgba(8,36,28,.6);backdrop-filter:blur(10px)">
-      <button id="chatFileBtn" ${temIA?'':'disabled'} aria-label="Enviar foto ou PDF" onclick="document.getElementById('chatFile').click()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">📎</button>
+    ${chatMsgs.length<=1?`<div id="chatSugestoes" style="padding:0 14px 8px;display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch">${sugestoes.map(([t,q])=>`<button onclick="_g.chatRapida('${q}')" style="white-space:nowrap;background:var(--chatChip);border:none;color:#3A3A38;font-size:13px;font-weight:500;padding:10px 15px;border-radius:22px">${t}</button>`).join("")}</div>`:""}
+    <div id="chatBar" style="padding:8px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;align-items:center;background:var(--chatHead)">
+      <button id="chatFileBtn" ${temIA?'':'disabled'} aria-label="Enviar foto ou PDF" onclick="document.getElementById('chatFile').click()" style="background:var(--chatChip);border:none;color:#6B6B6B;width:44px;height:44px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">📎</button>
       <input id="chatFile" type="file" multiple accept="image/*,application/pdf,.csv,.xlsx,.xls" style="display:none">
-      <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'lançar, perguntar ou 📎 foto/PDF…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:22px;padding:13px 16px;font-size:14px;background:rgba(255,255,255,.95);color:var(--ink)">
-      <button id="chatMic" class="micBtn" ${temIA?'':'disabled'} aria-label="Toque para gravar" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;width:46px;height:46px;border-radius:50%;font-size:19px;flex:none;${temIA?'':'opacity:.4'}">🎙️</button>
-      <button id="chatSend" onclick="_g.chatEnviar()" ${temIA?'':'disabled'} style="background:var(--gpink);border:none;color:#fff;width:46px;height:46px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">▸</button>
+      <button id="chatMic" class="micBtn" ${temIA?'':'disabled'} aria-label="Toque para gravar" style="background:var(--chatChip);border:none;color:#6B6B6B;width:44px;height:44px;border-radius:50%;font-size:18px;flex:none;${temIA?'':'opacity:.4'}">🎙️</button>
+      <input id="chatInput" onkeydown="if(event.key==='Enter')_g.chatEnviar()" placeholder="${temIA?'Pergunte ou lance um gasto…':'ative a IA em ⚙️ p/ conversar'}" ${temIA?'':'disabled'} style="flex:1;min-width:0;border:none;border-radius:24px;padding:13px 18px;font-size:15px;background:var(--chatInput);color:var(--chatInk)">
+      <button id="chatSend" onclick="_g.chatEnviar()" ${temIA?'':'disabled'} style="background:var(--chatSend);border:none;color:#fff;width:44px;height:44px;border-radius:50%;font-size:19px;flex:none;box-shadow:0 2px 8px rgba(37,99,235,.4);${temIA?'':'opacity:.4'}">↑</button>
     </div>
   </div>`;
 }
+function copiarTextoDe(btn){
+  try{
+    const cont=btn.closest("[data-msg]"); const t=cont?cont.getAttribute("data-msg")||cont.innerText:"";
+    if(navigator.clipboard) navigator.clipboard.writeText(t);
+    btn.textContent="✓"; setTimeout(()=>{ btn.textContent="⧉"; },1200);
+  }catch(e){}
+}
 function baloaHTML(m){
-  return m.de==="user"
-    ? `<div style="align-self:flex-end;max-width:82%;background:var(--gpink);color:#fff;padding:11px 14px;border-radius:18px 18px 4px 18px;font-size:14px;line-height:1.45;box-shadow:0 2px 10px rgba(255,101,132,.3)">${m.html}</div>`
-    : `<div style="align-self:flex-start;max-width:88%;background:#fff;color:#241A45;padding:12px 15px;border-radius:18px 18px 18px 4px;font-size:13.5px;line-height:1.5;box-shadow:0 3px 14px rgba(0,0,0,.12)">${m.html}</div>`;
+  const txt=(m.html||"").replace(/"/g,"&quot;");
+  if(m.de==="user"){
+    return `<div data-msg="${txt}" style="align-self:flex-end;max-width:86%">
+      <div style="background:var(--chatUser);color:var(--chatUserInk);padding:12px 16px;border-radius:20px;font-size:15px;line-height:1.5">${m.html}</div>
+      <div style="text-align:right;margin-top:3px"><button onclick="copiarTextoDe(this)" aria-label="copiar" style="background:none;border:none;color:#B9B9B4;font-size:14px;padding:2px 4px">⧉</button></div>
+    </div>`;
+  }
+  // resposta da IA: texto puro sobre o fundo (sem bolha, estilo RutAI/Claude)
+  return `<div data-msg="${txt}" style="align-self:stretch">
+    <div style="color:var(--chatInk);font-size:15.5px;line-height:1.6">${m.html}</div>
+    <div style="margin-top:4px"><button onclick="copiarTextoDe(this)" aria-label="copiar" style="background:none;border:none;color:#C2C2BC;font-size:14px;padding:2px 4px">⧉</button></div>
+  </div>`;
 }
 // PATCH: adiciona só a bolha nova (sem recriar o modal inteiro) e remove os
 // chips de sugestão após a primeira mensagem, sem outerHTML.
@@ -1548,12 +1566,10 @@ function atualizarChat(){
 function setChatEstado(e){
   chatEstado=e;
   if(!document.getElementById("chatOv")) return;
-  setOrbe(e,"orbeGuavChat");
   const rot=document.getElementById("chatRotulo");
   if(rot){
-    const [,c2]=ORBE_CORES[e]||ORBE_CORES.idle;
-    rot.textContent = e==="listening"?"ouvindo…":e==="computing"?"pensando…":"";
-    rot.style.color=c2;
+    rot.textContent = e==="listening"?"ouvindo…":e==="computing"?"pensando…":"copiloto financeiro";
+    rot.style.color = (e==="listening"||e==="computing") ? "var(--nu)" : "var(--chatSub)";
   }
 }
 G.chatEnviar=async()=>{
@@ -1625,7 +1641,7 @@ G.chatEnviar=async()=>{
 // indicador "digitando…" (três pontinhos) enquanto a IA pensa — como no Claude
 function mostrarDigitando(){
   const box=document.getElementById("chatMsgs"); if(!box||document.getElementById("iaTyping")) return;
-  box.insertAdjacentHTML("beforeend",`<div id="iaTyping" style="align-self:flex-start;background:#fff;padding:14px 16px;border-radius:18px 18px 18px 4px;box-shadow:0 3px 14px rgba(0,0,0,.12);display:inline-flex;gap:5px;align-items:center">
+  box.insertAdjacentHTML("beforeend",`<div id="iaTyping" style="align-self:flex-start;display:inline-flex;gap:5px;align-items:center;padding:4px 2px">
     <span class="typDot"></span><span class="typDot" style="animation-delay:.18s"></span><span class="typDot" style="animation-delay:.36s"></span></div>`);
   box.scrollTop=box.scrollHeight;
 }
@@ -2446,16 +2462,16 @@ G.ouvirPergunta=()=>{
     recAg.maxAlternatives=1;
     let captou=false;
     recAg.onresult=e=>{ let t=""; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript; if(inp){ inp.value=t; captou=!!t.trim(); } };
-    recAg.onend=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; }
+    recAg.onend=()=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="var(--chatChip)"; }
       setOrbe(estadoOrbePadrao());
       if(captou && inp && inp.value.trim()) G.perguntarLivre();
     };
-    recAg.onerror=ev=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="rgba(255,255,255,.15)"; } setOrbe(estadoOrbePadrao());
+    recAg.onerror=ev=>{ ouvindoAg=false; if(mic){ mic.textContent="🎙️"; mic.style.background="var(--chatChip)"; } setOrbe(estadoOrbePadrao());
       if(ev&&ev.error==="not-allowed" && inp){ inp.placeholder="permita o microfone nos ajustes do Safari"; }
       else if(ev&&ev.error==="no-speech" && inp){ inp.placeholder="não ouvi nada — toque e fale de novo"; }
     };
     recAg.start(); ouvindoAg=true; setOrbe("listening");
-    if(mic){ mic.textContent="⏹"; mic.style.background="var(--gpink)"; }
+    if(mic){ mic.textContent="⏹"; mic.style.background="var(--nu)"; mic.style.color="#fff"; }
   }catch(e){ ouvindoAg=false; if(inp){ inp.placeholder="não consegui ativar o microfone — digite"; } }
 };
 function estadoOrbePadrao(){
