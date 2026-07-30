@@ -65,7 +65,8 @@
   main.swap{animation:slideIn .22s ease both}
   @media(prefers-reduced-motion:reduce){.card,main.swap{animation:none}}
   h2{font-size:20px;font-weight:800;letter-spacing:-.3px;color:var(--ink)}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:stretch}
+  .grid2>*{min-width:0;max-width:100%;overflow:hidden}
   .btnP{background:linear-gradient(135deg,var(--nu-soft),var(--nu));color:#fff;border:none;border-radius:14px;padding:14px 18px;font-size:15px;font-weight:700;min-height:50px;box-shadow:0 6px 18px rgba(130,10,209,.28)}
   .btnG{background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;font-size:15px;font-weight:700;min-height:50px;color:var(--ink)}
   .inp{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:12px;font-size:16px;margin-top:4px;background:#fff;color:var(--ink)}
@@ -948,14 +949,14 @@ function viewInicio(){
     <div id="bannerSlot">${bannerMsg?`<div class="banner">${bannerMsg}</div>`:""}</div>
     ${cardInsights(p)}
     <div class="grid2">
-      <div class="card" style="background:linear-gradient(160deg,#1C4257 0%,#122A3D 100%);border:none;color:#fff;padding:16px 14px;position:relative;overflow:hidden;border-radius:22px;box-shadow:0 10px 26px rgba(18,42,61,.35)">
-        <div style="font-size:14px;font-weight:700;color:#fff">Disponível p/ gastar</div>
+      <div class="card" style="background:linear-gradient(160deg,#1C4257 0%,#122A3D 100%);border:none;color:#fff;padding:16px 14px;position:relative;overflow:hidden;border-radius:22px;box-shadow:0 10px 26px rgba(18,42,61,.35);min-width:0;max-width:100%">
+        <div style="font-size:13.5px;font-weight:700;color:#fff;line-height:1.2">Disponível p/ gastar</div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
           ${svgCarteira()}
           ${svgGauge(Math.max(0,Math.min(disponivel/Math.max(rendaMesAtual,1),1)))}
         </div>
-        <div style="font-size:26px;font-weight:800;color:#fff;margin-top:10px;letter-spacing:-.5px">${fmt(disponivel)}</div>
-        <div style="font-size:10.5px;color:#9FC3D6;margin-top:2px">de ${fmt(rendaMesAtual)} de renda${m.extra>0?` <span style="color:#FFD98A">· +${fmt(m.extra)} extra</span>`:""}</div>
+        <div style="font-size:22px;font-weight:800;color:#fff;margin-top:10px;letter-spacing:-.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmt(disponivel)}</div>
+        <div style="font-size:10.5px;color:#9FC3D6;margin-top:2px;overflow-wrap:anywhere;line-height:1.4">de ${fmt(rendaMesAtual)} de renda${m.extra>0?` <span style="color:#FFD98A">· +${fmt(m.extra)} extra</span>`:""}</div>
       </div>
       ${cardRenda(p)}
     </div>
@@ -1063,28 +1064,32 @@ function cardDashSelecionavel(p, guardadoAlvo, rend){
   return cardProx3(p);
 }
 
+// nomes vindos de fala/IA podem ser enormes; encurta para caber nos cards
+function nomeCurto(s,max){ s=String(s||"").trim(); max=max||26;
+  return s.length>max ? s.slice(0,max-1).trimEnd()+"…" : s; }
 // ===== Card de RENDA: base editável + extras do mês + empréstimos =====
 function cardRenda(p){
   const m=p[0];
   const extras=(state.receitas||[]).filter(r=>r.recorrente||(+r.mesIdx||0)===0);
   const somaExtra=m.extra||0;
   const nEmp=(state.receitas||[]).filter(r=>r._emprestimo).length;
-  return `<div class="card" style="background:linear-gradient(160deg,#A9C4E8 0%,#7FA3D6 100%);border:none;color:#fff;padding:14px 13px;border-radius:22px;box-shadow:0 10px 26px rgba(127,163,214,.4);display:flex;flex-direction:column">
+  return `<div class="card" style="background:linear-gradient(160deg,#A9C4E8 0%,#7FA3D6 100%);border:none;color:#fff;padding:14px 13px;border-radius:22px;box-shadow:0 10px 26px rgba(127,163,214,.4);display:flex;flex-direction:column;min-width:0;max-width:100%;overflow:hidden">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">
       <div style="font-size:13.5px;font-weight:700;line-height:1.2">Renda do mês</div>
       <button onclick="_g.editRenda()" aria-label="editar renda" style="flex:none;width:24px;height:24px;border-radius:50%;border:none;background:rgba(255,255,255,.25);color:#fff;font-size:11px;line-height:1;padding:0">✏️</button>
     </div>
-    <div style="margin-top:9px"><span style="font-size:23px;font-weight:800;letter-spacing:-.5px">${fmt(m.rendaMes||state.renda)}</span></div>
-    <div style="font-size:10.5px;color:#EAF2FF;line-height:1.45;margin-top:3px">
+    <div style="margin-top:9px;min-width:0"><span style="font-size:22px;font-weight:800;letter-spacing:-.5px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmt(m.rendaMes||state.renda)}</span></div>
+    <div style="font-size:10.5px;color:#EAF2FF;line-height:1.45;margin-top:3px;overflow-wrap:anywhere">
       base ${fmt(state.renda)}${somaExtra>0?` · <b style="color:#FFF3C4">+${fmt(somaExtra)} extra</b>`:""}
     </div>
-    ${somaExtra>0?`<div style="margin-top:8px;max-height:56px;overflow-y:auto">${extras.slice(0,3).map(r=>
-      `<div style="display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:#EAF2FF;padding:2px 0">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r._emprestimo?"🏦 ":""}${h(r.nome)}</span><b>+${fmt(r.valor)}</b></div>`).join("")}
+    ${somaExtra>0?`<div style="margin-top:8px;max-height:58px;overflow-y:auto;min-width:0">${extras.slice(0,3).map(r=>
+      `<div style="display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:#EAF2FF;padding:2px 0;min-width:0">
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r._emprestimo?"🏦 ":""}${h(nomeCurto(r.nome))}</span>
+        <b style="flex:none;white-space:nowrap">+${fmt(r.valor)}</b></div>`).join("")}
       ${extras.length>3?`<div style="font-size:9.5px;color:#EAF2FF;opacity:.8">+${extras.length-3} outras</div>`:""}</div>`:""}
-    <div style="display:flex;gap:6px;margin-top:10px">
-      <button onclick="_g.setTab('add')" style="flex:1;background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;font-size:11px;padding:8px;border-radius:9px">+ receita</button>
-      <button onclick="_g.novoEmprestimo()" style="flex:1;background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;font-size:11px;padding:8px;border-radius:9px">🏦 empréstimo</button>
+    <div style="display:flex;gap:6px;margin-top:10px;min-width:0">
+      <button onclick="_g.setTab('add')" style="flex:1;min-width:0;background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;font-size:10.5px;padding:8px 4px;border-radius:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">+ receita</button>
+      <button onclick="_g.novoEmprestimo()" style="flex:1;min-width:0;background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;font-size:10.5px;padding:8px 4px;border-radius:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🏦 crédito</button>
     </div>
     ${nEmp?`<div style="font-size:9.5px;color:#FFF3C4;margin-top:5px">${nEmp} empréstimo(s) cobrindo gaps</div>`:""}
   </div>`;
