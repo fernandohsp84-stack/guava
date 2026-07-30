@@ -167,7 +167,7 @@ const FUNCAO_URL_PADRAO = "https://southamerica-east1-guava-app-513a0.cloudfunct
 // ====================================================================
 
 // ---------- estado ----------
-let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[],objetivos:[],nome:"",cardDash:"proj3"};
+let state={renda:20000,metaPct:0.20,horizonte:12,itens:[],receitas:[],historico:[],pagosMes:{},mesRef:"",incentivos:[],serieHistorica:[],objetivos:[],nome:"",cardDash:"proj3",insightsAberto:false};
 let cfg={firebase:{
   apiKey:"AIzaSyDOEAOM9wRi1dUWLTMkxtvjpluEjaY2bCU",
   authDomain:"guava-app-513a0.firebaseapp.com",
@@ -243,6 +243,7 @@ function carregarLocal(){
     if(!Array.isArray(state.itens)) state.itens=[];
     for(const k of ["receitas","historico","incentivos","serieHistorica","objetivos"]) if(!Array.isArray(state[k])) state[k]=[];
     if(typeof state.pagosMes!=="object"||!state.pagosMes) state.pagosMes={};
+    insightsAberto=!!state.insightsAberto;   // restaura a preferência de ampliar/recolher
   } else {
     // primeira vez neste aparelho: começa com as despesas de exemplo
     state.itens=seed;
@@ -1113,7 +1114,8 @@ G.novoEmprestimo=()=>{
   status(`Empréstimo incluído: +${fmtV(v)} agora e ${n}x de ${fmtV(pmt)}.`,false);
 };
 
-// ===== INSIGHTS da projeção: gaps e como cobrir =====
+// ===== INSIGHTS da projeção: gaps e como cobrir (ampliar/recolher) =====
+let insightsAberto=false;
 function cardInsights(p){
   const gaps=p.map((x,i)=>({i,x})).filter(o=>o.x.sobra<0);
   const somaGap=gaps.reduce((a,o)=>a+Math.abs(o.x.sobra),0);
@@ -1152,12 +1154,61 @@ function cardInsights(p){
     corpo+=linha("💳","Parcelas do cartão",
       `O mês mais pesado é <b>${pico.x.mes}</b>, com <b>${fmtV(pico.x.parcela)}</b> em parcelas. Depois disso o caixa alivia.`);
   }
+  // ---- extras que só aparecem quando o usuário amplia ----
+  let corpoExtra="";
+  if(insightsAberto){
+    // 1) categorias que mais pesam
+    const cats=(typeof Analise!=="undefined"&&Analise.porCategoria)?Analise.porCategoria().slice(0,3):[];
+    if(cats.length) corpoExtra+=linha("📊","Onde o dinheiro vai",
+      cats.map(c=>`• <b>${h(c.cat)}</b> — ${fmtV(c.total)}/mês`).join("<br>"),
+      `<button onclick="_g.setTab('despesas')" style="margin-top:7px;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:11.5px;padding:7px 11px;border-radius:9px">ver despesas</button>`);
+    // 2) quando as parcelas aliviam
+    const comParc=p.map((x,i)=>({i,x})).filter(o=>o.x.parcela>0);
+    if(comParc.length){
+      const ultima=comParc[comParc.length-1];
+      const queda=p[0].parcela-(p[Math.min(3,p.length-1)].parcela||0);
+      corpoExtra+=linha("📉","Quando as parcelas aliviam",
+        `Hoje você paga <b>${fmtV(p[0].parcela)}</b> em parcelas.${queda>0?` Em 3 meses cai cerca de <b>${fmtV(queda)}</b>.`:""} A última parcela cai em <b>${ultima.x.mes}/${ultima.x.ano}</b>.`);
+    }
+    // 3) meta de poupança
+    const alvo=state.renda*state.metaPct, sobraMedia=p.reduce((a,x)=>a+x.sobra,0)/Math.max(p.length,1);
+    corpoExtra+=linha(sobraMedia>=alvo?"🌱":"🎯","Meta de poupança",
+      sobraMedia>=alvo
+        ? `Sua sobra média é <b>${fmtV(sobraMedia)}</b>/mês — acima da meta de <b>${fmtV(alvo)}</b>. Dá para guardar com folga.`
+        : `Sua meta é guardar <b>${fmtV(alvo)}</b>/mês, mas a sobra média é <b>${fmtV(sobraMedia)}</b>. Faltam <b>${fmtV(alvo-sobraMedia)}</b>.`,
+      `<button onclick="_g.setTab('metas')" style="margin-top:7px;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:11.5px;padding:7px 11px;border-radius:9px">ajustar meta</button>`);
+    // 4) melhor e pior mês
+    const melhor=[...p].map((x,i)=>({i,x})).sort((a,b)=>b.x.sobra-a.x.sobra)[0];
+    const pior=[...p].map((x,i)=>({i,x})).sort((a,b)=>a.x.sobra-b.x.sobra)[0];
+    corpoExtra+=linha("📅","Melhor e pior mês",
+      `Mais folgado: <b>${melhor.x.mes}</b> (${fmtV(melhor.x.sobra)}) · Mais apertado: <b>${pior.x.mes}</b> (${fmtV(pior.x.sobra)}).`,
+      `<div style="display:flex;gap:7px;margin-top:7px">
+        <button onclick="_g.verMes(${melhor.i})" style="background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:11.5px;padding:7px 11px;border-radius:9px">ver ${melhor.x.mes}</button>
+        <button onclick="_g.verMes(${pior.i})" style="background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:11.5px;padding:7px 11px;border-radius:9px">ver ${pior.x.mes}</button>
+      </div>`);
+  }
+  // resumo de uma linha quando recolhido
+  const resumo = gaps.length
+    ? `<span style="color:#B4536B;font-weight:700">${gaps.length} ${gaps.length===1?"mês":"meses"} no vermelho</span> · falta ${fmtV(somaGap)}`
+    : `<span style="color:#0E7A55;font-weight:700">nenhum mês no vermelho</span> · menor folga ${fmtV(Math.min(...p.map(x=>x.sobra)))}`;
   return `<div class="card" style="margin-top:10px">
-    <div style="font-size:15px;font-weight:800;color:var(--ink);margin-bottom:2px">Insights da projeção</div>
-    <div style="font-size:11.5px;color:var(--mute);margin-bottom:2px">o que os próximos ${p.length} meses estão dizendo</div>
-    ${corpo}
+    <button onclick="_g.toggleInsights()" aria-expanded="${insightsAberto}" style="width:100%;background:none;border:none;padding:0;text-align:left;display:flex;align-items:flex-start;gap:10px">
+      <span style="flex:1;min-width:0">
+        <span style="display:block;font-size:15px;font-weight:800;color:var(--ink)">Insights da projeção</span>
+        <span style="display:block;font-size:11.5px;color:var(--mute);margin-top:2px;line-height:1.45">${insightsAberto?`o que os próximos ${p.length} meses estão dizendo`:resumo}</span>
+      </span>
+      <span style="flex:none;width:26px;height:26px;border-radius:50%;background:var(--graphiteSoft);color:var(--mute);font-size:12px;display:flex;align-items:center;justify-content:center;transition:transform .2s;transform:rotate(${insightsAberto?180:0}deg)">▾</span>
+    </button>
+    ${insightsAberto?`${corpo}${corpoExtra}
+      <button onclick="_g.toggleInsights()" style="width:100%;margin-top:10px;background:none;border:none;color:var(--mute);font-size:11.5px;font-weight:700;padding:6px">recolher ▴</button>`
+    :`<div style="margin-top:8px;padding-top:9px;border-top:1px solid var(--line);display:flex;gap:7px;flex-wrap:wrap">
+        ${gaps.length?`<button onclick="_g.verMes(${gaps[0].i})" style="background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:11.5px;padding:7px 12px;border-radius:9px">ver ${gaps[0].x.mes}</button>`:""}
+        <button onclick="_g.toggleInsights()" style="background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:11.5px;padding:7px 12px;border-radius:9px">ver detalhes</button>
+      </div>`}
   </div>`;
 }
+// preferência de exibição dos insights (fica salva)
+G.toggleInsights=()=>{ insightsAberto=!insightsAberto; state.insightsAberto=insightsAberto; salvar(); render(); };
 
 // GuavAI — apresentação central: nome ACIMA, mascote maior (proporcional aos
 // demais itens), o card inteiro é tocável e abre a tela conversacional.
