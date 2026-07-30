@@ -525,7 +525,7 @@ const Analise={
       projecao:p.map(x=>({mes:x.mes+"/"+x.ano, gasto:Math.round(x.total), saldo:Math.round(x.sobra), parcelas:Math.round(x.parcela), receitaExtra:Math.round(x.extra||0)})),
       parcelamentos:state.itens.filter(i=>i.natureza==="parcela").map(i=>({nome:i.nome,valor:i.valor,faltam:i.restam,cat:i.cat})),
       receitasExtras:(state.receitas||[]).map(r=>({nome:r.nome,valor:r.valor,recorrente:!!r.recorrente,mes:r.recorrente?"todo mês":mesLabelIdx(r.mesIdx)})),
-      guiaNavegacao:"Abas do app: Início (visão geral e escore de Comportamento no círculo do gráfico); Projeção (saldo e composição mês a mês); Despesas (todos os lançamentos; filtro 'Todas' mostra inclusive parcelas, que exibem 'faltam Nx'); Metas (metas de poupança e objetivos como viagem/carro); '+ Adicionar' (incluir despesa ou receita; a lista de receitas fica abaixo do formulário); Saiba+ (ajuda e ⚙️ Configurar, onde ficam conta/login, backup exportar/importar). Lançamentos feitos pelo GuavAI de despesa vão para a aba Despesas; receitas vão para '+ Adicionar' e afetam Projeção e o gráfico da tela inicial.",
+      guiaNavegacao:"Barra inferior: Início (gráfico com escore; toque num mês para abrir o detalhe; cards 'Disponível p/ gastar' e 'Renda do mês'; card 'Insights da projeção' com gaps e sugestões); Projeção (mês a mês); GuavAI no centro (esta conversa); Despesas (todos os lançamentos, filtro 'Todas' mostra parcelas); Mais (reúne Adicionar, Metas e objetivos, Saiba mais e ⚙️ Configurar). A renda é editada no card 'Renda do mês' (lápis), que também mostra receitas extras e permite simular empréstimo para cobrir gaps.",
     };
   }
 };
@@ -882,18 +882,45 @@ function render(){
   else if(tab==="add"){ app.innerHTML=viewAdd(); ligarAdd(); }
   else if(tab==="config"){ app.innerHTML=viewConfig(); ligarConfig(); }
   else if(tab==="saiba") app.innerHTML=viewSaiba();
+  else if(tab==="mais") app.innerHTML=viewMais();
   // depois do primeiro paint, desliga a re-animação de "pop" dos cards (ver CSS
   // body.boot-done .card{animation:none}) — ela só deve rodar na entrada inicial.
   if(!document.body.classList.contains("boot-done")){
     requestAnimationFrame(()=>document.body.classList.add("boot-done"));
   }
 }
+function viewMais(){
+  const it=(icone,tit,sub,acao)=>`<button onclick="${acao}" class="card" style="width:100%;display:flex;align-items:center;gap:13px;text-align:left;padding:15px 14px;margin-bottom:9px">
+    <div style="width:42px;height:42px;border-radius:12px;background:var(--greenSoft);display:flex;align-items:center;justify-content:center;font-size:19px;flex:none">${icone}</div>
+    <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:800;color:var(--ink)">${tit}</div>
+      <div style="font-size:12px;color:var(--mute);line-height:1.4;margin-top:2px">${sub}</div></div>
+    <span style="color:var(--mute);font-size:18px">›</span></button>`;
+  return `<div style="padding-top:16px">
+    <h2 style="margin-bottom:4px">Mais</h2>
+    <div style="font-size:12.5px;color:var(--mute);margin-bottom:14px">incluir lançamentos, metas e ajuda</div>
+    ${it("➕","Adicionar","despesa, receita, foto, PDF ou planilha","_g.setTab('add')")}
+    ${it("◎","Metas e objetivos","meta de poupança e seus objetivos","_g.setTab('metas')")}
+    ${it("?","Saiba mais","como o app funciona, segurança e privacidade","_g.setTab('saiba')")}
+    ${it("⚙️","Configurar","conta, sincronização, backup e IA","_g.setTab('config')")}
+    <button onclick="_g.abrirChat()" class="card" style="width:100%;background:var(--grad-dash);border:none;color:#fff;display:flex;align-items:center;gap:12px;text-align:left;padding:15px 14px;margin-top:4px">
+      ${orbeGuavAI('idle',38,'orbeMais')}
+      <span style="flex:1;min-width:0"><span style="display:block;font-size:15px;font-weight:800">Falar com o GuavAI</span>
+        <span style="display:block;font-size:11.5px;color:#BEE3CC">lançar, perguntar, enviar 📎 ou criar objetivos</span></span>
+      <span style="font-size:18px;color:#BEE3CC">›</span></button>
+  </div>`;
+}
 function renderNav(){
-  const items=[["inicio","⌂","Início"],["proj","◔","Projeção"],["despesas","▤","Despesas"],["metas","◎","Metas"],["add","+","Adicionar"],["saiba","?","Saiba+"]];
+  const items=[["inicio","⌂","Início"],["proj","◔","Projeção"],["guavai","","GuavAI"],["despesas","▤","Despesas"],["mais","⋯","Mais"]];
   document.getElementById("nav").innerHTML=items.map(([k,ic,l])=>{
-    const ativo = tab===k || (k==="proj"&&tab==="detalheMes");
-    const cls=(k==="add"?"plus ":"")+(ativo?"on":"");
-    return `<button class="${cls.trim()}" onclick="_g.setTab('${k}')"><div class="ic">${ic}</div><div class="lb">${l}</div></button>`;
+    const ativo = tab===k || (k==="proj"&&tab==="detalheMes") || (k==="mais"&&(tab==="add"||tab==="saiba"||tab==="metas"||tab==="config"));
+    if(k==="guavai"){
+      // botão central em destaque: abre a conversa com o GuavAI
+      return `<button class="plus" onclick="_g.abrirChat()" aria-label="Abrir GuavAI">
+        <div class="ic" style="display:flex;align-items:center;justify-content:center">${orbeGuavAI(humorGuav(calcularEscore(projecao(),state.renda,state.metaPct)),30,'orbeNav')}</div>
+        <div class="lb">GuavAI</div></button>`;
+    }
+    const cls=(ativo?"on":"");
+    return `<button class="${cls}" onclick="_g.setTab('${k}')"><div class="ic">${ic}</div><div class="lb">${l}</div></button>`;
   }).join("");
 }
 
@@ -908,20 +935,18 @@ function viewInicio(){
   const esc=calcularEscore(p,state.renda,state.metaPct);
   const rend=(state.metaPct*100);
   return `<div style="background:linear-gradient(180deg,#14532D 0%,#0F4A38 62%,#0D3E44 100%);margin:0 -14px;padding:2px 14px 16px;border-radius:0 0 26px 26px;box-shadow:0 12px 26px rgba(15,74,56,.28)">
-    <div style="padding:2px 2px 12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <span style="font-size:12px;font-weight:${state.horizonte===12?800:500};color:${state.horizonte===12?'#fff':'#BEE3CC'}">Visão Atual: 12 meses</span>
-        <button onclick="_g.setHor(${state.horizonte===12?18:12})" aria-label="alternar horizonte" style="width:46px;height:26px;border-radius:20px;border:none;background:${state.horizonte===18?'#3FD9BC':'rgba(255,255,255,.28)'};position:relative;padding:0;transition:background .2s;flex:none">
-          <span style="position:absolute;top:3px;left:${state.horizonte===18?'23px':'3px'};width:20px;height:20px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.35)"></span>
-        </button>
-        <span style="font-size:12px;font-weight:${state.horizonte===18?800:500};color:${state.horizonte===18?'#fff':'#BEE3CC'}">Visão Expandida: 18 meses</span>
+    <div style="padding:2px 2px 10px;display:flex;justify-content:center">
+      <div style="display:inline-flex;background:rgba(255,255,255,.14);border-radius:20px;padding:3px">
+        ${[12,18].map(h=>`<button onclick="_g.setHor(${h})" style="border:none;border-radius:17px;padding:6px 16px;font-size:12px;font-weight:800;background:${state.horizonte===h?'#fff':'transparent'};color:${state.horizonte===h?'#0F4A38':'#BEE3CC'}">${h}m</button>`).join("")}
       </div>
     </div>
     ${cardVisaoFuturo(p,esc)}
+    <div style="text-align:center;font-size:10.5px;color:#BEE3CC;margin-top:-4px">toque num mês para ver receitas e despesas</div>
   </div>
   <div style="height:12px"></div>
   <div>
     <div id="bannerSlot">${bannerMsg?`<div class="banner">${bannerMsg}</div>`:""}</div>
+    ${cardInsights(p)}
     <div class="grid2">
       <div class="card" style="background:linear-gradient(160deg,#1C4257 0%,#122A3D 100%);border:none;color:#fff;padding:16px 14px;position:relative;overflow:hidden;border-radius:22px;box-shadow:0 10px 26px rgba(18,42,61,.35)">
         <div style="font-size:14px;font-weight:700;color:#fff">Disponível p/ gastar</div>
@@ -932,9 +957,8 @@ function viewInicio(){
         <div style="font-size:26px;font-weight:800;color:#fff;margin-top:10px;letter-spacing:-.5px">${fmt(disponivel)}</div>
         <div style="font-size:10.5px;color:#9FC3D6;margin-top:2px">de ${fmt(rendaMesAtual)} de renda${m.extra>0?` <span style="color:#FFD98A">· +${fmt(m.extra)} extra</span>`:""}</div>
       </div>
-      ${cardDashSelecionavel(p, guardadoAlvo, rend)}
+      ${cardRenda(p)}
     </div>
-    ${cardGuavAICentral(esc)}
     <div class="card">
       <div style="font-size:11px;font-weight:700;color:var(--navy);letter-spacing:.3px">LIMITE DE GASTOS MENSAL</div>
       <div style="font-size:22px;font-weight:800;color:var(--navy);margin-top:4px">${fmt(m.total)}</div>
@@ -1037,6 +1061,97 @@ function cardDashSelecionavel(p, guardadoAlvo, rend){
   if(v==="meta") return cardMetaPoupanca(guardadoAlvo,rend);
   if(v==="objetivo") return cardObjetivoDash();
   return cardProx3(p);
+}
+
+// ===== Card de RENDA: base editável + extras do mês + empréstimos =====
+function cardRenda(p){
+  const m=p[0];
+  const extras=(state.receitas||[]).filter(r=>r.recorrente||(+r.mesIdx||0)===0);
+  const somaExtra=m.extra||0;
+  const nEmp=(state.receitas||[]).filter(r=>r._emprestimo).length;
+  return `<div class="card" style="background:linear-gradient(160deg,#A9C4E8 0%,#7FA3D6 100%);border:none;color:#fff;padding:14px 13px;border-radius:22px;box-shadow:0 10px 26px rgba(127,163,214,.4);display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">
+      <div style="font-size:13.5px;font-weight:700;line-height:1.2">Renda do mês</div>
+      <button onclick="_g.editRenda()" aria-label="editar renda" style="flex:none;width:24px;height:24px;border-radius:50%;border:none;background:rgba(255,255,255,.25);color:#fff;font-size:11px;line-height:1;padding:0">✏️</button>
+    </div>
+    <div style="margin-top:9px"><span style="font-size:23px;font-weight:800;letter-spacing:-.5px">${fmt(m.rendaMes||state.renda)}</span></div>
+    <div style="font-size:10.5px;color:#EAF2FF;line-height:1.45;margin-top:3px">
+      base ${fmt(state.renda)}${somaExtra>0?` · <b style="color:#FFF3C4">+${fmt(somaExtra)} extra</b>`:""}
+    </div>
+    ${somaExtra>0?`<div style="margin-top:8px;max-height:56px;overflow-y:auto">${extras.slice(0,3).map(r=>
+      `<div style="display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:#EAF2FF;padding:2px 0">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r._emprestimo?"🏦 ":""}${h(r.nome)}</span><b>+${fmt(r.valor)}</b></div>`).join("")}
+      ${extras.length>3?`<div style="font-size:9.5px;color:#EAF2FF;opacity:.8">+${extras.length-3} outras</div>`:""}</div>`:""}
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <button onclick="_g.setTab('add')" style="flex:1;background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;font-size:11px;padding:8px;border-radius:9px">+ receita</button>
+      <button onclick="_g.novoEmprestimo()" style="flex:1;background:rgba(255,255,255,.25);border:none;color:#fff;font-weight:700;font-size:11px;padding:8px;border-radius:9px">🏦 empréstimo</button>
+    </div>
+    ${nEmp?`<div style="font-size:9.5px;color:#FFF3C4;margin-top:5px">${nEmp} empréstimo(s) cobrindo gaps</div>`:""}
+  </div>`;
+}
+// Empréstimo para cobrir gap: entra como receita no mês e cria as parcelas
+G.novoEmprestimo=()=>{
+  const v=parseMoeda(prompt("Valor do empréstimo (entra como recebimento):")||"");
+  if(!(v>0)) return;
+  const n=parseInt(prompt("Em quantas parcelas você vai pagar?","12")||"0",10);
+  if(!(n>0)) return;
+  const tx=parseFloat(String(prompt("Taxa de juros ao mês, em % (ex.: 2,5):","2")||"").replace(",","."))/100;
+  const i=isFinite(tx)&&tx>0?tx:0;
+  const pmt=i>0 ? v*i/(1-Math.pow(1+i,-n)) : v/n;
+  const mesIdx=parseInt(prompt("Em qual mês entra? (0 = este mês, 1 = próximo…)","0")||"0",10)||0;
+  const total=pmt*n;
+  if(!confirm(`Empréstimo de ${fmtV(v)} em ${n}x de ${fmtV(pmt)}\n\nTotal pago: ${fmtV(total)} (juros de ${fmtV(total-v)})\n\nIncluir?`)) return;
+  state.receitas=state.receitas||[];
+  state.receitas.push({id:"r"+Date.now(),nome:"Empréstimo",valor:v,mesIdx,recorrente:false,cat:"Empréstimo",_emprestimo:true});
+  lancar({nome:"Parcela do empréstimo",cat:"Empréstimo",natureza:"parcela",valor:Math.round(pmt*100)/100,restam:n,total:Math.round(total*100)/100});
+  salvar(); render();
+  status(`Empréstimo incluído: +${fmtV(v)} agora e ${n}x de ${fmtV(pmt)}.`,false);
+};
+
+// ===== INSIGHTS da projeção: gaps e como cobrir =====
+function cardInsights(p){
+  const gaps=p.map((x,i)=>({i,x})).filter(o=>o.x.sobra<0);
+  const somaGap=gaps.reduce((a,o)=>a+Math.abs(o.x.sobra),0);
+  const folgas=p.map((x,i)=>({i,x})).filter(o=>o.x.sobra>0);
+  const pico=[...p].map((x,i)=>({i,x})).sort((a,b)=>b.x.parcela-a.x.parcela)[0];
+  const linha=(ic,tit,txt,btn)=>`<div style="display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)">
+    <div style="width:28px;height:28px;border-radius:9px;background:var(--greenSoft);display:flex;align-items:center;justify-content:center;font-size:14px;flex:none">${ic}</div>
+    <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:var(--ink)">${tit}</div>
+      <div style="font-size:11.5px;color:var(--mute);line-height:1.5;margin-top:2px">${txt}</div>${btn||""}</div>
+  </div>`;
+  let corpo="";
+  if(!gaps.length){
+    corpo=linha("🌿","Nenhum mês no vermelho",
+      `Nos próximos ${p.length} meses seus gastos cabem na renda. A menor folga é de <b>${fmtV(Math.min(...p.map(x=>x.sobra)))}</b>.`);
+  } else {
+    const g1=gaps[0];
+    const rec=[];
+    // 1) usar folga de meses anteriores
+    const folgaAntes=folgas.filter(o=>o.i<g1.i).reduce((a,o)=>a+o.x.sobra,0);
+    if(folgaAntes>=Math.abs(g1.x.sobra)) rec.push(`guardar <b>${fmtV(Math.abs(g1.x.sobra))}</b> das folgas dos meses anteriores`);
+    // 2) diluir a maior parcela
+    if(pico&&pico.x.parcela>0) rec.push(`renegociar as parcelas do cartão (pico de <b>${fmtV(pico.x.parcela)}</b> em ${pico.x.mes})`);
+    // 3) receita extra
+    rec.push(`antecipar uma receita extra (13º, PLR, bônus)`);
+    corpo=linha("⚠️",`${gaps.length} ${gaps.length===1?"mês fecha":"meses fecham"} no vermelho`,
+      `Falta <b>${fmtV(somaGap)}</b> no total — o primeiro é <b>${g1.x.mes}/${g1.x.ano}</b>, com <b>${fmtV(Math.abs(g1.x.sobra))}</b>.`,
+      `<button onclick="_g.verMes(${g1.i})" style="margin-top:7px;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:11.5px;padding:7px 12px;border-radius:9px">ver ${g1.x.mes}</button>`)
+    + linha("💡","Como cobrir", rec.map(r=>"• "+r).join("<br>"),
+      `<div style="display:flex;gap:7px;margin-top:8px;flex-wrap:wrap">
+        <button onclick="_g.novoEmprestimo()" style="background:#fff;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:11.5px;padding:7px 11px;border-radius:9px">🏦 simular empréstimo</button>
+        <button onclick="_g.abrirChat()" style="background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:11.5px;padding:7px 11px;border-radius:9px">pedir ajuda ao GuavAI</button>
+      </div>`);
+  }
+  // pico de parcelas, sempre útil
+  if(pico&&pico.x.parcela>0&&gaps.length===0){
+    corpo+=linha("💳","Parcelas do cartão",
+      `O mês mais pesado é <b>${pico.x.mes}</b>, com <b>${fmtV(pico.x.parcela)}</b> em parcelas. Depois disso o caixa alivia.`);
+  }
+  return `<div class="card" style="margin-top:10px">
+    <div style="font-size:15px;font-weight:800;color:var(--ink);margin-bottom:2px">Insights da projeção</div>
+    <div style="font-size:11.5px;color:var(--mute);margin-bottom:2px">o que os próximos ${p.length} meses estão dizendo</div>
+    ${corpo}
+  </div>`;
 }
 
 // GuavAI — apresentação central: nome ACIMA, mascote maior (proporcional aos
@@ -1143,16 +1258,12 @@ function cardVisaoFuturo(p, esc){
   const gastoAtual=serie[0];
   // meses dentro do card (mostra ~9 rótulos)
   const passo=Math.max(1,Math.ceil(n/9));
-  const lblMeses=p.map((x,i)=> (i%passo===0)?`<span style="flex:1;text-align:center">${x.mes}</span>`:`<span style="flex:1"></span>`).join("");
+  const lblMeses=p.map((x,i)=> (i%passo===0)
+    ? `<button onclick="_g.verMes(${i})" style="flex:1;text-align:center;background:none;border:none;color:inherit;font:inherit;padding:2px 0">${x.mes}</button>`
+    : `<span style="flex:1"></span>`).join("");
   return `<div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:#fff;padding:12px 12px 8px;position:relative;overflow:hidden;border-radius:22px;margin:0;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)">
     <div style="position:absolute;inset:0;background:radial-gradient(420px 220px at 80% -10%, rgba(120,230,180,.18), transparent 62%);pointer-events:none"></div>
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;position:relative">
-      <span style="font-size:17px;font-weight:800;color:#fff">Visão de Futuro <span style="color:#BEE3CC;font-weight:600">(${state.horizonte} meses)</span></span>
-      ${(function(){ const nEst=serie.filter((v,i)=>estourou(i)).length;
-      return `<span style="font-size:10px;font-weight:700;display:flex;gap:8px;align-items:center">
-        ${temExtra?`<span style="color:#FFD98A">● renda +extras</span>`:""}
-        ${nEst?`<span style="color:#BEE3CC">▲ ${nEst} mês${nEst>1?"es":""} fora da escala</span>`:""}
-      </span>`; })()}
     </div>
     <div style="position:relative">
       <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block;overflow:visible">
@@ -1173,9 +1284,12 @@ function cardVisaoFuturo(p, esc){
         <path d="${linha}" fill="none" stroke="#D8FFE8" stroke-width="2.5" filter="url(#glowTeal)"/>
         ${rendaLine}
         ${pontos}${pico}${marcasExtra}${marcasEstouro}
+        ${p.map((x,i)=>{ const meia=(W/Math.max(n-1,1))/2; const X=px(i)-meia;
+          return `<rect x="${Math.max(X,0).toFixed(1)}" y="0" width="${(meia*2).toFixed(1)}" height="${H-footH}" fill="transparent" style="cursor:pointer" onclick="_g.verMes(${i})"><title>${x.mes}/${x.ano} — toque para ver o mês</title></rect>`;
+        }).join("")}
       </svg>
       <!-- pílula de renda (topo) -->
-      <button onclick="_g.editRenda()" style="position:absolute;top:-4px;right:2px;background:rgba(255,255,255,.95);border:none;border-radius:16px;padding:6px 14px;font-size:14px;font-weight:800;color:#14324E;box-shadow:0 4px 14px rgba(0,0,0,.3)">${fmt(state.renda)} <span style="font-size:11px">✏️</span></button>
+
       <!-- pílula de gasto atual -->
       <div style="position:absolute;top:52%;right:2px;background:rgba(20,44,84,.88);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(8px);border-radius:16px;padding:6px 14px;font-size:14px;font-weight:800">${fmt(gastoAtual)}</div>
       <!-- donut do escore ao centro -->
@@ -1511,7 +1625,7 @@ G.abrirChat=()=>{
     const esc=calcularEscore(projecao(),state.renda,state.metaPct);
     const nm=primeiroNome(state.nome);
     const ola = nm ? `Olá, <b>${nm}</b>!` : "Olá!";
-    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Posso <b>lançar despesas e receitas</b>, <b>criar objetivos e eventos</b> — é só me dizer <i>"gastei 60,67 no mercado"</i> ou <i>"recebi 500 de freela"</i> — ou enviar uma <b>foto/PDF</b> 📎. Também respondo dúvidas e faço sugestões.`}];
+    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Posso <b>lançar despesas e receitas</b>, <b>criar objetivos e eventos</b> — é só me dizer <i>"gastei 60,67 no mercado"</i> ou <i>"recebi 500 de freela"</i> — ou enviar <b>foto, PDF ou planilha</b> 📎. Se preferir o formulário completo, toque em <b>➕ Abrir Adicionar</b>. Também respondo dúvidas e faço sugestões.`}];
   }
   document.body.insertAdjacentHTML("beforeend", renderChat());
   document.body.style.overflow="hidden";
@@ -1525,7 +1639,7 @@ G.fecharChat=()=>{
 };
 function renderChat(){
   const sugestoes=[
-    ["📊 Gastos por categoria","cat"],["🍽️ Alimentação 3 meses","alim3"],
+    ["➕ Abrir Adicionar","__add"],["📊 Gastos por categoria","cat"],["🍽️ Alimentação 3 meses","alim3"],
     ["💳 Quando as parcelas aliviam","parc"],["⏩ Antecipar parcelas","antec"],
   ];
   const temIA=!!cfg.funcaoUrl;
@@ -1884,7 +1998,7 @@ function respostaAjuda(q){
   else if(tem("despesa","gasto","gastei","compra","comprei","farm","mercado","conta","boleto","cartão","cartao"))
     blocos.push(["🧾 Despesas","Ficam na aba <b>Despesas</b> (barra inferior). Use o filtro <b>Todas</b> para ver todas as naturezas — inclusive as recém-incluídas pelo GuavAI."]);
   if(tem("receita","renda extra","plr","13","bônus","bonus","reembolso","aluguel","salário extra","salario extra"))
-    blocos.push(["💰 Receitas","A lista fica na aba <b>➕ Adicionar</b>, abaixo do formulário de receita. O efeito no saldo aparece na <b>Projeção</b> e no gráfico da tela inicial (ponto dourado no mês)."]);
+    blocos.push(["💰 Receitas","Veja e edite no card <b>Renda do mês</b> (tela inicial) ou em <b>Mais → Adicionar</b>. O efeito aparece na <b>Projeção</b> e no gráfico (ponto dourado no mês)."]);
   if(tem("proje","futuro","meses","fluxo"))
     blocos.push(["📈 Projeção","Aba <b>Projeção</b>: saldo e composição mês a mês. O gráfico da tela inicial resume 12/18 meses."]);
   if(tem("meta","objetivo","viagem","carro","poupan"))
@@ -1896,7 +2010,7 @@ function respostaAjuda(q){
   if(tem("login","conta","sincron","entrar","google","apple"))
     blocos.push(["👤 Conta","Em <b>⚙️ Configurar → Sua conta</b> você entra com Google/Apple/e-mail e sincroniza entre aparelhos."]);
   if(!blocos.length)
-    blocos.push(["🧭 Mapa do app","<b>Início</b>: visão geral e escore · <b>Projeção</b>: mês a mês · <b>Despesas</b>: seus lançamentos · <b>Metas</b>: metas e objetivos · <b>➕ Adicionar</b>: incluir · <b>Saiba+</b>: ajuda e ⚙️ Configurar."]);
+    blocos.push(["🧭 Mapa do app","<b>Início</b>: gráfico, insights e cards · <b>Projeção</b>: mês a mês · <b>GuavAI</b> (centro): conversar e lançar · <b>Despesas</b>: seus lançamentos · <b>Mais</b>: Adicionar, Metas, Saiba mais e ⚙️ Configurar."]);
   const html=blocos.map(([t,d])=>`<div style="margin-bottom:8px"><b>${t}</b><br><span style="color:#556;font-size:13px">${d}</span></div>`).join("");
   const goDesp=tem("parcel","despesa","gasto","gastei","compra","comprei","farm","mercado","conta","boleto","cartão","cartao");
   const goProj=tem("receita","proje","futuro","fluxo","escore","comportamento");
@@ -2451,6 +2565,7 @@ async function onChatArquivo(e){
   propostaChat(itens, credLote);
 }
 G.chatRapida=(q)=>{
+  if(q==="__add"){ G.irParaDe("add"); return; }
   // reaproveita o motor determinístico Analise para respostas rápidas dentro do chat
   const rotulos={cat:"Gastos por categoria",alim3:"Alimentação nos próximos 3 meses",parc:"Quando as parcelas aliviam",antec:"Antecipar parcelas"};
   const userMsg={de:"user", html:rotulos[q]||q}; chatMsgs.push(userMsg); appendChatBubble(userMsg);
