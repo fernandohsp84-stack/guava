@@ -1160,7 +1160,7 @@ function cardInsights(p){
     // 1) categorias que mais pesam
     const cats=(typeof Analise!=="undefined"&&Analise.porCategoria)?Analise.porCategoria().slice(0,3):[];
     if(cats.length) corpoExtra+=linha("📊","Onde o dinheiro vai",
-      cats.map(c=>`• <b>${h(c.cat)}</b> — ${fmtV(c.total)}/mês`).join("<br>"),
+      cats.map(c=>`• <b>${h(c.cat)}</b> — ${fmtV(c.v)}/mês`).join("<br>"),
       `<button onclick="_g.setTab('despesas')" style="margin-top:7px;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:11.5px;padding:7px 11px;border-radius:9px">ver despesas</button>`);
     // 2) quando as parcelas aliviam
     const comParc=p.map((x,i)=>({i,x})).filter(o=>o.x.parcela>0);
@@ -2626,7 +2626,7 @@ G.chatRapida=(q)=>{
   const rotulos={cat:"Gastos por categoria",alim3:"Alimentação nos próximos 3 meses",parc:"Quando as parcelas aliviam",antec:"Antecipar parcelas"};
   const userMsg={de:"user", html:rotulos[q]||q}; chatMsgs.push(userMsg); appendChatBubble(userMsg);
   let html="";
-  if(q==="cat"){ const c=Analise.porCategoria(); html=`<b>Seus gastos por categoria (mês):</b>${c.slice(0,6).map(x=>`<div style="display:flex;justify-content:space-between;margin-top:5px"><span>${x.cat}</span><span style="font-weight:700;color:var(--emerald)">${fmt(x.total)}</span></div>`).join("")}`; }
+  if(q==="cat"){ const c=Analise.porCategoria(); html=`<b>Seus gastos por categoria (mês):</b>${c.slice(0,6).map(x=>`<div style="display:flex;justify-content:space-between;margin-top:5px"><span>${x.cat}</span><span style="font-weight:700;color:var(--emerald)">${fmt(x.v)}</span></div>`).join("")}`; }
   else if(q==="alim3"){ const r=[...Analise.principaisProximos(3,"Restaurante"),...Analise.principaisProximos(3,"Mercado")]; const tot=r.reduce((s,x)=>s+x.total,0); html=`<b>Alimentação nos próximos 3 meses:</b><div style="margin-top:4px">Total estimado: <b style="color:var(--emerald)">${fmt(tot)}</b></div>`; }
   else if(q==="parc"){ const ev=Analise.evolucaoParcelas(); html=`<b>Parcelas:</b> hoje <b style="color:var(--gpink)">${fmt(ev[0].parcela)}/mês</b> → em ${ev.length} meses <b style="color:var(--emerald)">${fmt(ev[ev.length-1].parcela)}/mês</b>. Cada parcelamento que termina libera espaço.`; }
   else if(q==="antec"){ html=`Me diga qual parcelamento quer antecipar (nome e valor) que eu simulo o desembolso e o alívio no orçamento.`; }
