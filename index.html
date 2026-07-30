@@ -1815,6 +1815,8 @@ G.chatEnviar=async()=>{
   }
 
   // --- 1.5) Dúvidas de LOCALIZAÇÃO/USO do app (onde está, como encontro, foi parar) ---
+  const dup=respostaDuplicados(q);
+  if(dup){ const m={de:"ia", html:dup}; chatMsgs.push(m); appendChatBubble(m); return; }
   const cmd=respostaComando(q);
   if(cmd){ const m={de:"ia", html:cmd}; chatMsgs.push(m); appendChatBubble(m); return; }
   const fin=respostaFinanceira(q);
@@ -1828,13 +1830,32 @@ G.chatEnviar=async()=>{
   mostrarDigitando();
   try{
     const dados=Analise.resumoParaIA();
-    dados.persona="Você é o GuavAI, o melhor amigo financeiro do usuário"+(state.nome?` (chame-o de ${primeiroNome(state.nome)})`:"")+". Responda SEMPRE em português do Brasil, tom caloroso, curto e direto (2-5 frases), sem jargão. Se houver déficit, acolha sem alarmar e sugira 1 ajuste concreto. Se houver sobra, celebre com moderação e sugira guardar. NUNCA afirme que registrou/incluiu lançamentos — quem registra é o app após confirmação do usuário na prévia; se pedirem para lançar algo, oriente: 'me diga o item e o valor que eu preparo a prévia para você confirmar'. Use o campo guiaNavegacao para orientar onde encontrar coisas no app. Você também executa comandos no app quando pedido: criar objetivo/meta, criar evento nos Incentivos, atualizar a renda e ajustar a meta de poupança — sempre com confirmação do usuário; se pedirem algo assim, oriente a dizer o comando com valor (ex.: 'criar objetivo viagem de 20 mil em 12 meses'). Você domina matemática financeira: Tabela Price e SAC, juros compostos, CET, comparação e portabilidade de dívidas (rotativo > cheque especial > pessoal > consignado) e planejamento de poupança; ao responder sobre empréstimos/dívidas, faça as contas passo a passo com os números do usuário e recomende sempre comparar pelo CET.";
+    // catálogo do que existe hoje, com ids — a IA precisa disso para propor exclusões/edições
+    dados.despesasComId=(state.itens||[]).map(x=>({id:x.id,nome:x.nome,natureza:x.natureza,
+      valor:x.natureza==="estimada"?provavel(x):(+x.valor||0),parcelasRestantes:x.restam||null,categoria:x.cat}));
+    dados.receitasComId=(state.receitas||[]).map(x=>({id:x.id,nome:x.nome,valor:+x.valor||0,recorrente:!!x.recorrente}));
+    dados.objetivosComId=(state.objetivos||[]).map(x=>({id:x.id,titulo:x.titulo,alvo:x.alvo,guardado:x.guardado}));
+    dados.protocoloAcoes=PROTOCOLO_ACOES;
+    dados.persona="Você é o GuavAI, o melhor amigo financeiro do usuário"+(state.nome?` (chame-o de ${primeiroNome(state.nome)})`:"")+". Responda SEMPRE em português do Brasil, tom caloroso, curto e direto (2-5 frases), sem jargão. Se houver déficit, acolha sem alarmar e sugira 1 ajuste concreto. Se houver sobra, celebre com moderação e sugira guardar. Você EXECUTA ações no app (criar/excluir/editar despesas e receitas, criar objetivos e eventos, ajustar renda e meta) devolvendo o JSON do protocoloAcoes — o app mostra a proposta com caixas de seleção e aplica após a confirmação do usuário. Nunca diga que 'não consegue' fazer isso, nem mande o usuário fazer manualmente: proponha as ações. Nunca afirme que já executou. Use o campo guiaNavegacao para orientar onde encontrar coisas no app. Você também executa comandos no app quando pedido: criar objetivo/meta, criar evento nos Incentivos, atualizar a renda e ajustar a meta de poupança — sempre com confirmação do usuário; se pedirem algo assim, oriente a dizer o comando com valor (ex.: 'criar objetivo viagem de 20 mil em 12 meses'). Você domina matemática financeira: Tabela Price e SAC, juros compostos, CET, comparação e portabilidade de dívidas (rotativo > cheque especial > pessoal > consignado) e planejamento de poupança; ao responder sobre empréstimos/dívidas, faça as contas passo a passo com os números do usuário e recomende sempre comparar pelo CET.";
     const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({pergunta:q, dados})});
     const d=await r.json();
     const txt=d.resposta||d.texto||"";
     removerDigitando();
-    const m={de:"ia", html:mdParaHtml(txt)||"Não consegui responder agora."}; chatMsgs.push(m); appendChatBubble(m);
+    // a IA pode devolver JSON com ações (como o RutAI). Se vier, montamos a proposta.
+    const pl=extrairPlano(txt);
+    if(pl && (pl.acoes||[]).length){
+      const itens=(pl.acoes||[]).map(a=>{
+        const fn=acaoDoModelo(a);
+        return fn?{texto:h(a.texto||a.tipo), raw:a}:null;
+      }).filter(Boolean);
+      const falaHtml=mdParaHtml(pl.fala||"")||"";
+      const prop=itens.length?propostaAcoes(pl.titulo||"Proposta", itens):"";
+      const m={de:"ia", html:(falaHtml||"Preparei isto para você confirmar:")+(prop||"")};
+      chatMsgs.push(m); appendChatBubble(m);
+    } else {
+      const m={de:"ia", html:mdParaHtml((pl&&pl.fala)||txt)||"Não consegui responder agora."}; chatMsgs.push(m); appendChatBubble(m);
+    }
   }catch(e){ removerDigitando(); const m={de:"ia", html:"Não consegui consultar a IA agora. Tente novamente em instantes."}; chatMsgs.push(m); appendChatBubble(m); }
   setChatEstado("idle");
 };
@@ -1849,6 +1870,211 @@ function removerDigitando(){ const el=document.getElementById("iaTyping"); if(el
 // ---- GuavAI: ler foto/PDF e propor lançamentos, e registrar por texto ----
 // rótulo curto de mês a partir do offset (0 = este mês)
 function mesLabelIdx(i){ const d=new Date(); d.setMonth(d.getMonth()+(+i||0)); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; }
+const PROTOCOLO_ACOES=`Você PODE executar ações no app. Quando o pedido do usuário implicar mudança nos dados (criar, incluir, adicionar, lançar, excluir, apagar, remover, corrigir, editar, ajustar, definir meta, criar objetivo/evento), responda SOMENTE com um JSON válido, sem markdown e sem crases:
+{"fala":"1-3 frases calorosas em pt-BR","titulo":"título curto do bloco","acoes":[...]}
+
+Tipos de ação (use os ids exatos que vieram em despesasComId / receitasComId / objetivosComId — nunca invente id):
+{"tipo":"criarDespesa","nome":"Farmácia","valor":95.16,"natureza":"eventual|ordinaria|estimada|parcela","parcelas":2,"categoria":"Saúde","mes":0,"texto":"Criar despesa Farmácia de R$ 95,16"}
+{"tipo":"excluirDespesa","id":"<id>","texto":"Excluir 'X' de R$ Y"}
+{"tipo":"editarDespesa","id":"<id>","campos":{"valor":120,"natureza":"parcela","parcelas":3},"texto":"..."}
+{"tipo":"criarReceita","nome":"PLR","valor":5000,"mes":3,"recorrente":false,"texto":"..."}
+{"tipo":"excluirReceita","id":"<id>","texto":"..."}
+{"tipo":"criarObjetivo","titulo":"Viagem ao Japão","alvo":20000,"prazoMeses":12,"guardado":0,"texto":"..."}
+{"tipo":"excluirObjetivo","id":"<id>","texto":"..."}
+{"tipo":"criarEvento","titulo":"Praia em janeiro","valor":3000,"tema":"praia|viagem|carro|casa|festa|estudo","texto":"..."}
+{"tipo":"ajustarRenda","valor":22000,"texto":"..."}
+{"tipo":"ajustarMeta","pct":15,"texto":"..."}
+
+REGRAS:
+- "texto" é o que o usuário lê antes de confirmar: curto, claro, com nome e valor.
+- Nunca diga que já executou. O app só aplica depois que o usuário marca e confirma.
+- Se o pedido for uma DÚVIDA ou ANÁLISE (sem mudar dados), responda em texto normal, sem JSON.
+- Ao propor exclusão de duplicatas, mantenha sempre uma cópia de cada item e explique qual mantém.
+- Máximo 12 ações por resposta.`;
+
+// extrai {fala, titulo, acoes} de uma resposta que pode vir com texto ao redor
+function extrairPlano(txt){
+  const t=String(txt||"").replace(/```json|```/g,"").trim();
+  const i=t.indexOf("{");
+  if(i<0) return null;
+  const tentar=(s)=>{ try{ const j=JSON.parse(s); return (j&&(j.acoes||j.fala))?j:null; }catch(e){ return null; } };
+  let j=tentar(t.slice(i));
+  if(j) return j;
+  // JSON cortado no meio: recua até o último objeto completo e fecha o que ficou aberto
+  const pendentes=(txt)=>{
+    const pilha=[]; let str=false, esc=false;
+    for(const ch of txt){
+      if(esc){ esc=false; continue; }
+      if(ch==="\\"){ esc=true; continue; }
+      if(ch==='"'){ str=!str; continue; }
+      if(str) continue;
+      if(ch==="{"||ch==="[") pilha.push(ch);
+      else if(ch==="}"||ch==="]") pilha.pop();
+    }
+    return pilha.reverse().map(c=>c==="{"?"}":"]").join("");
+  };
+  let s2=t.slice(i);
+  for(let k=0;k<60;k++){
+    const c=s2.lastIndexOf("}");
+    if(c<0) break;
+    s2=s2.slice(0,c+1);
+    j=tentar(s2+pendentes(s2));
+    if(j) return j;
+    s2=s2.slice(0,c);
+  }
+  return null;
+}
+// ===== MOTOR DE AÇÕES (estilo RutAI): a IA propõe, você confirma, o app aplica =====
+// Cada ação vira uma função aplicável. Nada acontece sem o "Aplicar o que marquei".
+function acaoDoModelo(a){
+  if(!a||!a.tipo) return null;
+  const acharItem=id=>(state.itens||[]).find(x=>x.id===id);
+  switch(a.tipo){
+    case "criarDespesa": return ()=>{
+      const nat=["ordinaria","estimada","eventual","parcela"].includes(a.natureza)?a.natureza:"eventual";
+      const it={nome:a.nome||"Despesa", cat:a.categoria||catGuess(String(a.nome||"").toLowerCase()), natureza:nat,
+        valor:parseMoeda(a.valor)};
+      if(nat==="parcela"){ it.restam=Math.max(1,parseInt(a.parcelas||a.restam||2,10)); it.total=it.valor*it.restam; }
+      else if(nat==="estimada"){ it.min=parseMoeda(a.min||a.valor)*0.8; it.max=parseMoeda(a.max||a.valor)*1.2; }
+      else it.mesIdx=Math.max(0,parseInt(a.mes||0,10));
+      lancar(it);
+    };
+    case "excluirDespesa": return ()=>{
+      const alvo=a.id?[a.id]:(Array.isArray(a.ids)?a.ids:[]);
+      state.itens=(state.itens||[]).filter(x=>!alvo.includes(x.id));
+    };
+    case "editarDespesa": return ()=>{
+      const it=acharItem(a.id); if(!it||!a.campos) return;
+      const m={nome:"nome",valor:"valor",categoria:"cat",natureza:"natureza",parcelas:"restam",mes:"mesIdx"};
+      Object.entries(a.campos).forEach(([k,v])=>{
+        if(!m[k]) return;
+        it[m[k]] = (k==="valor")?parseMoeda(v) : (k==="parcelas"||k==="mes")?parseInt(v,10) : v;
+      });
+      if(it.natureza==="parcela") it.total=(+it.valor||0)*(+it.restam||1);
+    };
+    case "criarReceita": return ()=>{
+      state.receitas=state.receitas||[];
+      state.receitas.push({id:"r"+Date.now()+Math.random().toString(36).slice(2,5),
+        nome:a.nome||"Receita", valor:parseMoeda(a.valor),
+        mesIdx:a.recorrente?0:Math.max(0,parseInt(a.mes||0,10)),
+        recorrente:!!a.recorrente, cat:"Receita"});
+    };
+    case "excluirReceita": return ()=>{
+      const alvo=a.id?[a.id]:(Array.isArray(a.ids)?a.ids:[]);
+      state.receitas=(state.receitas||[]).filter(x=>!alvo.includes(x.id));
+    };
+    case "criarObjetivo": return ()=>{
+      state.objetivos=state.objetivos||[];
+      state.objetivos.push({id:"g"+Date.now()+Math.random().toString(36).slice(2,5),
+        tipo:a.categoria||tipoObjetivoDoTexto(a.titulo||""), titulo:a.titulo||"Objetivo",
+        alvo:parseMoeda(a.alvo), guardado:parseMoeda(a.guardado||0),
+        prazoMeses:Math.max(0,parseInt(a.prazoMeses||0,10))});
+    };
+    case "excluirObjetivo": return ()=>{
+      state.objetivos=(state.objetivos||[]).filter(x=>x.id!==a.id);
+    };
+    case "criarEvento": return ()=>{
+      state.incentivos=state.incentivos||[];
+      state.incentivos.push({id:"i"+Date.now()+Math.random().toString(36).slice(2,5),
+        titulo:a.titulo||"Evento", data:a.data||"", valor:parseMoeda(a.valor||0),
+        tema:a.tema||"viagem", link:a.link||""});
+    };
+    case "ajustarRenda": return ()=>{ const v=parseMoeda(a.valor); if(v>0) state.renda=v; };
+    case "ajustarMeta": return ()=>{ const p=parseFloat(a.pct); if(p>0&&p<=80) state.metaPct=p/100; };
+    default: return null;
+  }
+}
+// ---- proposta de ações com checkboxes (visual do RutAI) ----
+let ACOES={}; let acSeq=0;
+function propostaAcoes(titulo, itens){
+  if(!itens||!itens.length) return null;
+  const pid="ac"+(++acSeq);
+  ACOES[pid]=itens.map(x=>({...x,_sel:true}));
+  return htmlProposta(pid, titulo);
+}
+function htmlProposta(pid, titulo){
+  const its=ACOES[pid]||[];
+  const n=its.filter(x=>x._sel).length;
+  return `<div id="prop_${pid}" style="background:#fff;border-left:4px solid #1F6F4A;border-radius:10px;padding:12px;margin-top:10px;box-shadow:0 1px 3px rgba(9,30,66,.18)">
+    <div style="font-size:10.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#1F6F4A;margin-bottom:8px">${h(titulo||"Proposta")} · confirme antes de aplicar</div>
+    ${its.map((x,i)=>`<div onclick="_g.acToggle('${pid}',${i})" style="display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:${i?"1px solid #F0F0EC":"none"};cursor:pointer">
+      <span style="width:22px;height:22px;flex:none;border-radius:50%;border:2px solid ${x._sel?"#1F6F4A":"#B3BAC5"};background:${x._sel?"#1F6F4A":"transparent"};color:${x._sel?"#fff":"transparent"};display:flex;align-items:center;justify-content:center;font-size:12px;margin-top:1px">✓</span>
+      <span style="flex:1;min-width:0;font-size:14px;line-height:1.45;color:var(--ink)">${x.texto}</span>
+    </div>`).join("")}
+    <div style="display:flex;gap:7px;margin-top:11px">
+      <button onclick="_g.acRecusar('${pid}')" style="flex:1;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:700;background:#F1F1EF;color:#6B6B6B">Agora não</button>
+      <button onclick="_g.acAplicar('${pid}')" style="flex:1;border:none;border-radius:8px;padding:11px;font-size:13px;font-weight:700;background:#1F6F4A;color:#fff">Aplicar o que marquei${n?` (${n})`:""}</button>
+    </div>
+  </div>`;
+}
+G.acToggle=(pid,i)=>{
+  const its=ACOES[pid]; if(!its||!its[i]) return;
+  its[i]._sel=!its[i]._sel;
+  const el=document.getElementById("prop_"+pid);
+  if(el) el.outerHTML=htmlProposta(pid,its._titulo||"Proposta");
+};
+G.acRecusar=(pid)=>{
+  const el=document.getElementById("prop_"+pid);
+  if(el) el.innerHTML=`<div style="text-align:center;font-size:13px;font-weight:700;color:#8895a5;padding:10px">Nada mudou</div>`;
+  delete ACOES[pid];
+};
+G.acAplicar=(pid)=>{
+  const its=ACOES[pid]; if(!its) return;
+  const marc=its.filter(x=>x._sel);
+  if(!marc.length){ status("Marque ao menos um item.",true); return; }
+  let ok=0, erro=0;
+  marc.forEach(x=>{ try{ const fn=acaoDoModelo(x.raw); if(fn){ fn(); ok++; } else erro++; }catch(e){ erro++; } });
+  delete ACOES[pid];
+  salvar(); filtroDesp="todos"; render();
+  const el=document.getElementById("prop_"+pid);
+  if(el) el.innerHTML=`<div style="display:flex;gap:8px;align-items:center;justify-content:center;padding:9px">
+    <span style="font-size:13px;font-weight:700;color:#1F6F4A">✓ ${ok} aplicada(s)${erro?` · ${erro} falhou`:""}</span>
+    <button onclick="_g.irParaDe('despesas')" style="background:#1F6F4A;color:#fff;border:none;border-radius:8px;padding:8px 13px;font-size:12.5px;font-weight:700">Ver no app →</button></div>`;
+  const m={de:"ia", html:`Pronto — apliquei ${ok} ${ok===1?"mudança":"mudanças"} e já atualizei o app. ✅`};
+  chatMsgs.push(m); appendChatBubble(m);
+};
+
+// ===== SKILL: revisão de duplicados (local, sem depender da nuvem) =====
+function acharDuplicados(){
+  const its=(state.itens||[]);
+  const grupos={};
+  const raiz=s=>{
+    const p=chaveNome(s).split(" ").filter(w=>w.length>2);
+    return p.length?p[0].slice(0,7):"";      // 1ª palavra significativa, 7 letras (pega plural/variação)
+  };
+  its.forEach(it=>{
+    const k=raiz(it.nome);
+    if(!k) return;
+    (grupos[k]=grupos[k]||[]).push(it);
+  });
+  const susp=[];
+  Object.entries(grupos).forEach(([k,arr])=>{
+    if(arr.length<2) return;
+    // dentro do grupo, marca pares com valores muito próximos (≤2% ou ≤R$2)
+    const vistos=new Set();
+    for(let i=0;i<arr.length;i++) for(let j=i+1;j<arr.length;j++){
+      const a=arr[i], b=arr[j];
+      const va=+a.valor||0, vb=+b.valor||0;
+      const dif=Math.abs(va-vb);
+      const prox = dif<=Math.max(2, Math.min(va,vb)*0.02);
+      if(prox && !vistos.has(b.id)){ vistos.add(b.id); susp.push({manter:a, dup:b}); }
+    }
+  });
+  return susp;
+}
+function respostaDuplicados(q){
+  if(!/duplicad|duplica[çc][ãa]o|repetid|em dobro|dobrad|lan[çc]ei duas vezes|mesma despesa/i.test(q)) return null;
+  const susp=acharDuplicados();
+  if(!susp.length) return `🔍 Revisei suas <b>${(state.itens||[]).length}</b> despesas e <b>não encontrei duplicatas</b> — nomes iguais com valores praticamente idênticos. Tudo limpo. 🌿`;
+  const acoes=susp.map(p=>({
+    texto:`Excluir <b>${h(nomeCurto(p.dup.nome,30))}</b> — ${fmtV(p.dup.natureza==="estimada"?provavel(p.dup):p.dup.valor)}${p.dup.natureza==="parcela"?` (${p.dup.restam}x)`:""} <span style="color:#8895a5">· mantém a de ${fmtV(p.manter.natureza==="estimada"?provavel(p.manter):p.manter.valor)}</span>`,
+    raw:{tipo:"excluirDespesa", id:p.dup.id}
+  }));
+  const soma=susp.reduce((a,p)=>a+(+p.dup.valor||0),0);
+  return `🔍 Encontrei <b>${susp.length}</b> ${susp.length===1?"possível duplicata":"possíveis duplicatas"} — juntas somam <b>${fmtV(soma)}</b>/mês.<br>
+    <span style="font-size:13px;color:#8895a5">Marque as que quer remover. Deixo sempre uma cópia de cada.</span>
+    ${propostaAcoes("Remover duplicatas", acoes)}`;
+}
 // ===== SKILL: comandos do app (criar objetivo, evento, ajustar renda/meta) =====
 // Tudo passa por confirmação, igual aos lançamentos: o GuavAI propõe, você aplica.
 let acaoPendente=null;
