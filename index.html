@@ -1483,7 +1483,7 @@ G.abrirChat=()=>{
     const esc=calcularEscore(projecao(),state.renda,state.metaPct);
     const nm=primeiroNome(state.nome);
     const ola = nm ? `Olá, <b>${nm}</b>!` : "Olá!";
-    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Posso <b>lançar despesas e receitas</b> — é só me dizer <i>"gastei 60,67 no mercado"</i> ou <i>"recebi 500 de freela"</i> — ou enviar uma <b>foto/PDF</b> 📎. Também respondo dúvidas e faço sugestões.`}];
+    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Posso <b>lançar despesas e receitas</b>, <b>criar objetivos e eventos</b> — é só me dizer <i>"gastei 60,67 no mercado"</i> ou <i>"recebi 500 de freela"</i> — ou enviar uma <b>foto/PDF</b> 📎. Também respondo dúvidas e faço sugestões.`}];
   }
   document.body.insertAdjacentHTML("beforeend", renderChat());
   document.body.style.overflow="hidden";
@@ -1617,6 +1617,8 @@ G.chatEnviar=async()=>{
   }
 
   // --- 1.5) Dúvidas de LOCALIZAÇÃO/USO do app (onde está, como encontro, foi parar) ---
+  const cmd=respostaComando(q);
+  if(cmd){ const m={de:"ia", html:cmd}; chatMsgs.push(m); appendChatBubble(m); return; }
   const fin=respostaFinanceira(q);
   if(fin){ const m={de:"ia", html:fin}; chatMsgs.push(m); appendChatBubble(m); return; }
   const aj=respostaAjuda(q);
@@ -1628,7 +1630,7 @@ G.chatEnviar=async()=>{
   mostrarDigitando();
   try{
     const dados=Analise.resumoParaIA();
-    dados.persona="Você é o GuavAI, o melhor amigo financeiro do usuário"+(state.nome?` (chame-o de ${primeiroNome(state.nome)})`:"")+". Responda SEMPRE em português do Brasil, tom caloroso, curto e direto (2-5 frases), sem jargão. Se houver déficit, acolha sem alarmar e sugira 1 ajuste concreto. Se houver sobra, celebre com moderação e sugira guardar. NUNCA afirme que registrou/incluiu lançamentos — quem registra é o app após confirmação do usuário na prévia; se pedirem para lançar algo, oriente: 'me diga o item e o valor que eu preparo a prévia para você confirmar'. Use o campo guiaNavegacao para orientar onde encontrar coisas no app. Você domina matemática financeira: Tabela Price e SAC, juros compostos, CET, comparação e portabilidade de dívidas (rotativo > cheque especial > pessoal > consignado) e planejamento de poupança; ao responder sobre empréstimos/dívidas, faça as contas passo a passo com os números do usuário e recomende sempre comparar pelo CET.";
+    dados.persona="Você é o GuavAI, o melhor amigo financeiro do usuário"+(state.nome?` (chame-o de ${primeiroNome(state.nome)})`:"")+". Responda SEMPRE em português do Brasil, tom caloroso, curto e direto (2-5 frases), sem jargão. Se houver déficit, acolha sem alarmar e sugira 1 ajuste concreto. Se houver sobra, celebre com moderação e sugira guardar. NUNCA afirme que registrou/incluiu lançamentos — quem registra é o app após confirmação do usuário na prévia; se pedirem para lançar algo, oriente: 'me diga o item e o valor que eu preparo a prévia para você confirmar'. Use o campo guiaNavegacao para orientar onde encontrar coisas no app. Você também executa comandos no app quando pedido: criar objetivo/meta, criar evento nos Incentivos, atualizar a renda e ajustar a meta de poupança — sempre com confirmação do usuário; se pedirem algo assim, oriente a dizer o comando com valor (ex.: 'criar objetivo viagem de 20 mil em 12 meses'). Você domina matemática financeira: Tabela Price e SAC, juros compostos, CET, comparação e portabilidade de dívidas (rotativo > cheque especial > pessoal > consignado) e planejamento de poupança; ao responder sobre empréstimos/dívidas, faça as contas passo a passo com os números do usuário e recomende sempre comparar pelo CET.";
     const r=await fetch(cfg.funcaoUrl,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({pergunta:q, dados})});
     const d=await r.json();
@@ -1649,6 +1651,138 @@ function removerDigitando(){ const el=document.getElementById("iaTyping"); if(el
 // ---- GuavAI: ler foto/PDF e propor lançamentos, e registrar por texto ----
 // rótulo curto de mês a partir do offset (0 = este mês)
 function mesLabelIdx(i){ const d=new Date(); d.setMonth(d.getMonth()+(+i||0)); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; }
+// ===== SKILL: comandos do app (criar objetivo, evento, ajustar renda/meta) =====
+// Tudo passa por confirmação, igual aos lançamentos: o GuavAI propõe, você aplica.
+let acaoPendente=null;
+function valorDoTexto(s){
+  let t=" "+String(s).toLowerCase()+" ";
+  // remove trechos de prazo para não confundir "12 meses" com valor
+  t=t.replace(/\d+\s*(meses|m[êe]s|anos?|%)/g," ");
+  const vals=[];
+  // "20 mil", "1,5 milhão"
+  const re=/(\d[\d.]*(?:,\d{1,2})?)\s*(mil|milh[õo]es|milh[ãa]o)?/g;
+  let m;
+  while((m=re.exec(t))!==null){
+    let bruto=m[1];
+    // "22.000" (milhar pt-BR, sem centavos) x "12.34" (decimal com ponto)
+    let v = /^\d{1,3}(?:\.\d{3})+$/.test(bruto) ? parseInt(bruto.replace(/\./g,""),10) : parseMoeda(bruto);
+    if(m[2]==="mil") v*=1000;
+    else if(m[2]&&/milh/.test(m[2])) v*=1000000;
+    if(v>0) vals.push(v);
+  }
+  return vals.length?vals.sort((a,b)=>b-a)[0]:0;
+}
+function mesesDoTexto(s){
+  const m=String(s).toLowerCase().match(/(\d+)\s*(meses|m[êe]s)/);
+  if(m) return parseInt(m[1],10);
+  const a=String(s).toLowerCase().match(/(\d+)\s*anos?/);
+  if(a) return parseInt(a[1],10)*12;
+  return 0;
+}
+function tipoObjetivoDoTexto(s){
+  if(/viagem|viajar|passeio|f[ée]rias/i.test(s)) return "viagem";
+  if(/carro|moto|ve[íi]culo/i.test(s)) return "carro";
+  if(/casa|apartamento|im[óo]vel|reforma/i.test(s)) return "casa";
+  if(/reserva|emerg[êe]ncia/i.test(s)) return "reserva";
+  if(/estudo|curso|faculdade|mba/i.test(s)) return "estudo";
+  return "outro";
+}
+function nomeDoComando(t){
+  let n=String(t)
+    .replace(/\d[\d.,]*/g,"")
+    .replace(/\b(criar?|crie|adicionar?|adicione|novo|nova|objetivo|meta|guardar|juntar|quero|gostaria|para|pra|de|do|da|em|no|na|com|até|ate|reais|r\$|mil|milh[õo]es|milh[ãa]o|meses|m[êe]s|anos?|evento|incentivo|show|festa|um|uma)\b/gi," ")
+    .replace(/\s+/g," ").trim();
+  return n ? n.replace(/^./,c=>c.toUpperCase()) : "";
+}
+// Interpreta pedidos de comando do app. Devolve HTML da proposta ou null.
+function respostaComando(q){
+  const s=q.toLowerCase();
+  const cria=/\b(criar?|crie|adicionar?|adicione|come[çc]ar|inicie|iniciar|quero)\b/.test(s);
+
+  // --- objetivo / meta de poupança ---
+  const ehEvento=/\bevento\b|\bincentivo\b|passeio|show|festa|anivers[áa]rio/.test(s);
+  if(cria && !ehEvento && (/\bobjetivo\b|\bmeta\b|juntar|guardar para|poupar para/.test(s)) && !/despesa|receita|gasto/.test(s)){
+    const alvo=valorDoTexto(q);
+    if(alvo<=0) return `Posso criar um objetivo para você. Me diga o <b>valor</b> e, se quiser, o prazo — por exemplo: <i>"criar objetivo viagem ao Japão de 20 mil em 12 meses"</i>.`;
+    const meses=mesesDoTexto(q);
+    const tipo=tipoObjetivoDoTexto(q);
+    const titulo=nomeDoComando(q)||"Novo objetivo";
+    acaoPendente={tipo:"objetivo", dados:{titulo,alvo,prazoMeses:meses,tipoObj:tipo}};
+    const porMes=meses?` — <b>${fmtV(alvo/meses)}/mês</b> para chegar lá`:"";
+    return `🎯 Vou criar este objetivo:<div style="margin:8px 0;line-height:1.7">
+      <b>${h(titulo)}</b><br>alvo <b>${fmtV(alvo)}</b>${meses?` · prazo <b>${meses} meses</b>`:""}${porMes}</div>
+      ${botoesComando("criar objetivo")}`;
+  }
+
+  // --- evento / incentivo (passeio, viagem marcada) ---
+  if(cria && ehEvento){
+    const valor=valorDoTexto(q);
+    const titulo=nomeDoComando(q)||"Novo evento";
+    const tema=/praia|mar/i.test(s)?"praia":/carro/i.test(s)?"carro":/casa/i.test(s)?"casa":/festa|show|anivers/i.test(s)?"festa":/estudo|curso/i.test(s)?"estudo":"viagem";
+    acaoPendente={tipo:"incentivo", dados:{titulo,valor,tema}};
+    return `🎉 Vou criar este evento nos Incentivos:<div style="margin:8px 0;line-height:1.7">
+      <b>${h(titulo)}</b>${valor?` · meta <b>${fmtV(valor)}</b>`:""}</div>
+      <span style="font-size:12px;color:#8895a5">Depois você pode adicionar a data, a foto e as memórias do passeio.</span>
+      ${botoesComando("criar evento")}`;
+  }
+
+  // --- ajustar renda ---
+  if(/\b(minha renda|renda passou|renda agora|mudar.*renda|atualizar.*renda|ganho agora|sal[áa]rio agora|sal[áa]rio passou)\b/.test(s)){
+    const v=valorDoTexto(q);
+    if(v<=0) return `Me diga o novo valor da renda — por exemplo: <i>"minha renda agora é 20.000"</i>.`;
+    acaoPendente={tipo:"renda", dados:{valor:v}};
+    return `💼 Vou atualizar sua renda mensal de <b>${fmtV(state.renda)}</b> para <b>${fmtV(v)}</b>.<br>
+      <span style="font-size:12px;color:#8895a5">Isso recalcula a projeção, o escore e a meta de poupança.</span>
+      ${botoesComando("atualizar renda")}`;
+  }
+
+  // --- ajustar meta de poupança (%) ---
+  if(/\bmeta de poupan|guardar\s+\d+\s*%|poupar\s+\d+\s*%|quero guardar\b/.test(s)){
+    const mp=s.match(/(\d{1,2})\s*%/);
+    const pct=mp?parseInt(mp[1],10):0;
+    if(!pct) return `Me diga quantos por cento da renda você quer guardar — por exemplo: <i>"quero guardar 15% da renda"</i>.`;
+    acaoPendente={tipo:"meta", dados:{pct}};
+    return `🌱 Vou ajustar sua meta de poupança para <b>${pct}%</b> da renda — <b>${fmtV(state.renda*pct/100)}/mês</b>.
+      ${botoesComando("ajustar meta")}`;
+  }
+  return null;
+}
+function botoesComando(rotulo){
+  return `<div style="display:flex;gap:8px;margin-top:10px">
+    <button onclick="_g.aplicarComando()" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:13px;padding:10px;border-radius:9px">${rotulo}</button>
+    <button onclick="_g.cancelarComando()" style="background:none;border:1px solid #cfd6dd;color:#8895a5;font-weight:700;font-size:13px;padding:10px 12px;border-radius:9px">agora não</button>
+  </div>`;
+}
+G.cancelarComando=()=>{
+  acaoPendente=null;
+  const m={de:"ia", html:"Ok, não mexi em nada. 👍"}; chatMsgs.push(m); appendChatBubble(m);
+};
+G.aplicarComando=()=>{
+  const a=acaoPendente; if(!a) return;
+  acaoPendente=null;
+  let msg="", destino="";
+  if(a.tipo==="objetivo"){
+    state.objetivos=state.objetivos||[];
+    state.objetivos.push({id:"g"+Date.now(), tipo:a.dados.tipoObj, titulo:a.dados.titulo,
+      alvo:a.dados.alvo, guardado:0, prazoMeses:a.dados.prazoMeses||0});
+    msg=`Objetivo <b>${h(a.dados.titulo)}</b> criado 🎯 — veja a trilha em <b>Metas</b>.`; destino="metas";
+  } else if(a.tipo==="incentivo"){
+    state.incentivos=state.incentivos||[];
+    state.incentivos.push({id:"i"+Date.now(), titulo:a.dados.titulo, data:"", valor:a.dados.valor||0,
+      tema:a.dados.tema, link:""});
+    msg=`Evento <b>${h(a.dados.titulo)}</b> criado 🎉 — está nos Incentivos da tela inicial.`; destino="inicio";
+  } else if(a.tipo==="renda"){
+    state.renda=a.dados.valor;
+    msg=`Renda atualizada para <b>${fmtV(a.dados.valor)}</b> ✅ — projeção e escore recalculados.`; destino="proj";
+  } else if(a.tipo==="meta"){
+    state.metaPct=a.dados.pct/100;
+    msg=`Meta de poupança agora é <b>${a.dados.pct}%</b> ✅ (${fmtV(state.renda*a.dados.pct/100)}/mês).`; destino="metas";
+  }
+  salvar(); render();
+  const btn=destino?`<div style="margin-top:9px"><button onclick="_g.irParaDe('${destino}')" style="background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px 14px;border-radius:9px">ver agora</button></div>`:"";
+  const m={de:"ia", html:msg+btn}; chatMsgs.push(m); appendChatBubble(m);
+};
+
 // ===== SKILL: matemática financeira (empréstimo, dívida, poupança) =====
 // Responde localmente com cálculos reais (Tabela Price, juros compostos).
 function pctDe(s){ const m=s.match(/(\d[\d.,]*)\s*%/); return m?num(m[1])/100:null; }
@@ -2102,8 +2236,10 @@ async function extrairTextoPDF(file){
   const buf=await file.arrayBuffer();
   const doc=await P.getDocument({data:buf}).promise;
   const linhas=[];
-  const nPag=Math.min(doc.numPages,12);
+  const nPag=Math.min(doc.numPages,40);           // faturas longas: até 40 páginas
+  if(doc.numPages>40 && typeof status==="function") status(`PDF com ${doc.numPages} páginas — li as 40 primeiras.`,true);
   for(let p=1;p<=nPag;p++){
+    if(p%5===0) await new Promise(r=>setTimeout(r,0));   // respira: não trava a tela
     const page=await doc.getPage(p);
     const tc=await page.getTextContent();
     const porY={};
@@ -2122,8 +2258,29 @@ async function extrairTextoPDF(file){
 }
 // interpreta linhas de fatura (BB, CAIXA, Nubank...): "DD/MM DESCRIÇÃO ... 1.234,56 [D|C]"
 let ultimoCredito={n:0,soma:0};
+// Cada banco escreve a fatura de um jeito. Em vez de tentar uma regra única,
+// detectamos "pistas" no texto e escolhemos como interpretar débito x crédito.
+function perfilDaFatura(linhas){
+  const t=linhas.join(" ").slice(0,20000);
+  const p={ banco:"genérico", sufixoDC:false, negativoEhCredito:true, colunaCredito:false };
+  if(/cart[õo]es caixa|caixa econ[ôo]mica/i.test(t)){ p.banco="CAIXA"; p.sufixoDC=true; }
+  else if(/banco do brasil|ourocard|bb\.com\.br/i.test(t)){ p.banco="Banco do Brasil"; }
+  else if(/nubank|nu pagamentos/i.test(t)){ p.banco="Nubank"; }
+  else if(/ita[úu]|itaucard/i.test(t)){ p.banco="Itaú"; }
+  else if(/bradesco/i.test(t)){ p.banco="Bradesco"; }
+  else if(/santander/i.test(t)){ p.banco="Santander"; }
+  else if(/inter\b|banco inter/i.test(t)){ p.banco="Inter"; }
+  // se aparecem muitos "123,45D" / "123,45C", o banco usa sufixo D/C
+  const dc=(t.match(/\d,\d{2}\s*[DC]\b/g)||[]).length;
+  if(dc>=5) p.sufixoDC=true;
+  // se há coluna explícita de crédito/pagamento
+  if(/cr[ée]dito\s*\/?\s*d[ée]bito|d[ée]bito\s*\/?\s*cr[ée]dito/i.test(t)) p.colunaCredito=true;
+  return p;
+}
+let perfilAtual=null;
 function parseLinhasFatura(linhas){
   const out=[]; ultimoCredito={n:0,soma:0};
+  const perfil=perfilAtual=perfilDaFatura(linhas);
   // ruído estrutural do documento — nunca é lançamento, em qualquer situação
   const ESTRUTURAL=/saldo|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|limite|vencimento|\bcet\b|d[óo]lar|peso argentino|us\$|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers|parcelamento da fatura|cr[ée]dito rotativo/i;
   // termos que SUGEREM crédito/pagamento — só valem quando a linha NÃO está
