@@ -1840,7 +1840,7 @@ G.abrirChat=()=>{
     const esc=calcularEscore(projecao(),state.renda,state.metaPct);
     const nm=primeiroNome(state.nome);
     const ola = nm ? `Olá, <b>${nm}</b>!` : "Olá!";
-    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Posso <b>lançar despesas e receitas</b>, <b>criar objetivos e eventos</b> — é só me dizer <i>"gastei 60,67 no mercado"</i> ou <i>"recebi 500 de freela"</i> — ou enviar <b>foto, PDF ou planilha</b> 📎. Se preferir o formulário completo, toque em <b>➕ Abrir Adicionar</b>. Também respondo dúvidas e faço sugestões.`}];
+    chatMsgs=[{de:"ia", html:`${ola} Sou o <b>GuavAI</b>, seu copiloto financeiro. Seu escore está em <b>${esc.score}</b> (${esc.faixa.nome}).<br>Posso <b>lançar despesas e receitas</b>, <b>criar objetivos e eventos</b> — é só me dizer <i>"gastei 60,67 no mercado"</i> ou <i>"recebi 500 de freela"</i> — ou enviar <b>foto, PDF ou planilha</b> 📎 — ou <b>colar o texto</b> de um extrato. Se preferir o formulário completo, toque em <b>➕ Abrir Adicionar</b>. Também respondo dúvidas e faço sugestões.`}];
   }
   document.body.insertAdjacentHTML("beforeend", renderChat());
   document.body.style.overflow="hidden";
@@ -1936,6 +1936,23 @@ G.chatEnviar=async()=>{
   chatMsgs.push(userMsg); appendChatBubble(userMsg);
   if(inp) inp.value="";
   const low=q.toLowerCase();
+
+  // --- 0z) TEXTO DE EXTRATO COLADO (Live Text do print, ou copiado do app) ---
+  if(pareceExtrato(q)){
+    setChatEstado("computing"); mostrarDigitando();
+    const linhas=q.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    const brutos=parseLinhasFatura(linhas);
+    let itens=posProcessarFatura(brutos.map(x=>{
+      if(x.parcelaTotal>=2 && x.parcelaAtual>=1)
+        return {nome:x.nome, valor:x.valor, natureza:"parcela", restam:x.parcelaTotal-x.parcelaAtual+1, total:x.valor*x.parcelaTotal, data:x.data};
+      return {nome:x.nome, valor:x.valor, data:x.data};
+    }));
+    itens=dedupLote(itens.map(x=>({...x,_src:0})));
+    removerDigitando(); setChatEstado("idle");
+    if(itens.length){ propostaChat(itens); return; }
+    const m={de:"ia", html:"Recebi o texto, mas não reconheci linhas de lançamento nele. Se puder, cole incluindo o valor de cada linha (ex.: <i>Centauro R$ 86,65</i>)."};
+    chatMsgs.push(m); appendChatBubble(m); return;
+  }
 
   // --- 0a) "incluir mesmo assim" — força itens marcados como duplicados ---
   if(/incluir mesmo assim|inclua mesmo assim|pode incluir assim mesmo|for[çc]ar inclus[ãa]o|incluir duplicad/i.test(low)){
@@ -2084,6 +2101,18 @@ function extrairPlano(txt){
     s2=s2.slice(0,c);
   }
   return null;
+}
+// Texto colado de um extrato/fatura (Live Text do print ou cópia do app):
+// várias linhas e vários valores monetários — muito diferente de "gastei 60 no mercado".
+function pareceExtrato(t){
+  const txt=String(t||"");
+  const linhas=txt.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  if(linhas.length<4) return false;
+  const comValor=linhas.filter(l=>/(?:R\$\s*)?\d{1,3}(?:\.\d{3})*,\d{2}/.test(l)).length;
+  if(comValor<3) return false;
+  // sinais típicos de extrato de app/fatura
+  const sinais=/cart[ãa]o virtual|final \d{4}|parcela \d+ de \d+|\d{1,2} de (janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)|pagar fatura|lan[çc]amentos|processando|\d{2}\/\d{2}\/\d{4}/i;
+  return sinais.test(txt) || comValor>=5;
 }
 // ===== MOTOR DE AÇÕES (estilo RutAI): a IA propõe, você confirma, o app aplica =====
 // Cada ação vira uma função aplicável. Nada acontece sem o "Aplicar o que marquei".
@@ -2877,7 +2906,17 @@ function dedupLote(itens){
 function extracaoRuim(itens){
   if(!itens.length) return false;
   const semNome=itens.filter(x=>!x.nome||/^(despesa|item|lan[çc]amento)/i.test(String(x.nome).trim())).length;
-  return semNome>=Math.ceil(itens.length*0.6);
+  if(semNome>=Math.ceil(itens.length*0.6)) return true;
+  // ECO DE EXEMPLO: a IA às vezes devolve os itens genéricos do próprio prompt
+  // ("Aluguel 150, Supermercado 50, Transporte 30") em vez de ler a imagem.
+  const GENERICOS=/^(aluguel|supermercado|mercado|transporte|alimenta[çc][ãa]o|lazer|sa[úu]de|educa[çc][ãa]o|contas?|internet|luz|[áa]gua|telefone|despesas? gerais|outros)$/i;
+  const nGen=itens.filter(x=>GENERICOS.test(String(x.nome||"").trim())).length;
+  const redondos=itens.filter(x=>{ const v=+x.valor||0; return v>0 && v%10===0; }).length;
+  const semData=itens.filter(x=>!x.data).length;
+  // 3+ itens, maioria com nome genérico, valores redondos e nenhuma data = exemplo
+  if(itens.length>=2 && nGen>=Math.ceil(itens.length*0.6)
+     && redondos>=Math.ceil(itens.length*0.6) && semData===itens.length) return true;
+  return false;
 }
 const INSTRUCOES_FATURA="Extraia TODOS os lançamentos visíveis. Pode ser um PDF de fatura OU um print da tela do app do banco. No print de app, cada lançamento ocupa várias linhas: nome e valor na primeira, depois \"Cartão virtual · Final 0000\", a hora, e quando houver \"Parcela X de Y\" — devolva parcelaAtual=X e parcelaTotal=Y. Títulos como \"25 de julho, sábado\" são a data das compras listadas abaixo deles: use essa data no campo \"data\" (formato DD/MM ou AAAA-MM-DD). Ignore \"Cartão virtual\", \"Final 0000\", \"Processando\", \"Pagar fatura\" e as abas de mês. Responda SOMENTE um JSON array, sem texto ao redor: [{\"nome\":string,\"valor\":number,\"parcelaAtual\":number|null,\"parcelaTotal\":number|null}]. Regras: o nome é a descrição do estabelecimento SEM a data; números no fim como '04 06' indicam parcela 4 de 6 (preencha parcelaAtual/parcelaTotal); valor em reais com centavos; ignore linhas de AJUSTE, ESTORNO, PAGAMENTO, TOTAL e créditos.";
 // ---- Extração local de texto de PDF (pdf.js do CDN, sob demanda) ----
@@ -3147,7 +3186,18 @@ async function onChatArquivo(e){
   }
   itens=dedupLote(itens);
   removerDigitando(); setChatEstado("idle");
-  if(!itens.length){ const det=ultimoErroArq?`<br><span style="font-size:11.5px;color:#8895a5">Detalhe técnico: ${h(ultimoErroArq)}.</span>`:""; ultimoErroArq=null; const m={de:"ia", html:`Não consegui extrair lançamentos dos arquivos${falhas?` (${falhas} falharam)`:""}.${det}<br>Dica: fotos muito longas podem cortar — envie a fatura por partes, ou me diga os itens em texto: <i>"mercado 250; luz 180"</i>.`}; chatMsgs.push(m); appendChatBubble(m); return; }
+  if(!itens.length){
+    const det=ultimoErroArq?`<div style="font-size:11.5px;color:#8895a5;margin-top:6px">Detalhe técnico: ${h(ultimoErroArq)}.</div>`:"";
+    ultimoErroArq=null;
+    const m={de:"ia", html:`Não consegui extrair os lançamentos dessa imagem${falhas?` (${falhas} ${falhas===1?"falhou":"falharam"})`:""}.${det}
+      <div style="margin-top:10px;padding:11px 12px;background:var(--greenSoft);border:1px solid #BFE0D2;border-radius:11px;line-height:1.55">
+        <b>Jeito que funciona bem no iPhone 👇</b><br>
+        1. Abra o print em <b>Fotos</b><br>
+        2. <b>Toque e segure</b> sobre a lista → <b>Selecionar tudo</b> → <b>Copiar</b><br>
+        3. Volte aqui, <b>cole no campo</b> e envie
+        <div style="font-size:11.5px;color:#5b7a6d;margin-top:6px">Eu leio o texto do extrato direto no aparelho — inclusive "Parcela 5 de 10" e as datas dos títulos.</div>
+      </div>`};
+    chatMsgs.push(m); appendChatBubble(m); return; }
   propostaChat(itens, credLote);
 }
 G.chatRapida=(q)=>{
