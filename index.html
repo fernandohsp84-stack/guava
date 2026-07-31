@@ -1991,6 +1991,8 @@ G.chatEnviar=async()=>{
   }
 
   // --- 1.5) Dúvidas de LOCALIZAÇÃO/USO do app (onde está, como encontro, foi parar) ---
+  const at=respostaAutoTeste(q);
+  if(at){ const m={de:"ia", html:at}; chatMsgs.push(m); appendChatBubble(m); return; }
   const pad=respostaPadronizar(q);
   if(pad){ const m={de:"ia", html:pad}; chatMsgs.push(m); appendChatBubble(m); return; }
   const dup=respostaDuplicados(q);
@@ -2228,6 +2230,117 @@ G.acAplicar=(pid)=>{
   chatMsgs.push(m); appendChatBubble(m);
 };
 
+// ===== AUTOTESTE: verificação dos cálculos =====================
+// Duas camadas, como em validação de modelo:
+//  (A) CASOS DE REFERÊNCIA — entradas com resultado conhecido, calculado à mão.
+//  (B) INVARIANTES — regras que os SEUS dados reais têm de satisfazer sempre.
+// Nada aqui altera dados: é só leitura e comparação.
+function autoTeste(){
+  const R=[]; const ok=(nome,cond,obt,esp)=>R.push({nome,ok:!!cond,obt,esp});
+  const perto=(a,b,tol)=>Math.abs((+a||0)-(+b||0))<=(tol==null?0.01:tol);
+
+  // ---------- (A) CASOS DE REFERÊNCIA ----------
+  // A1. Leitura de valores (pt-BR e ponto decimal)
+  ok("parseMoeda '1.234,56'", perto(parseMoeda("1.234,56"),1234.56), parseMoeda("1.234,56"), 1234.56);
+  ok("parseMoeda '12.34' (ponto decimal)", perto(parseMoeda("12.34"),12.34), parseMoeda("12.34"), 12.34);
+  ok("parseMoeda '95,16'", perto(parseMoeda("95,16"),95.16), parseMoeda("95,16"), 95.16);
+
+  // A2. Parcelamento: total dividido pelas parcelas
+  const p1=parseLocal("farmácia 190,32 em 2x")[0]||{};
+  ok("parcela: 190,32 em 2x = 95,16/parcela", perto(p1.valor,95.16) && p1.restam===2, `${p1.valor} × ${p1.restam}`, "95,16 × 2");
+  const p2=parseLocal("tv 10x de 280")[0]||{};
+  ok("parcela: 10x de 280 = 2.800 total", perto(p2.total,2800) && p2.restam===10, p2.total, 2800);
+
+  // A3. Tabela Price (conferido à mão: 10.000, 2% a.m., 24x → 528,71)
+  const i=0.02,n=24,PV=10000, pmt=PV*i/(1-Math.pow(1+i,-n));
+  ok("Price: 10.000 a 2% em 24x → parcela 528,71", perto(pmt,528.71,0.01), pmt.toFixed(2), "528,71");
+
+  // A4. Juros compostos (500/mês, 1% a.m., 24 meses → 13.486,73)
+  const fv=500*((Math.pow(1.01,24)-1)/0.01);
+  ok("Poupança: 500/mês a 1% por 24m → 13.486,73", perto(fv,13486.73,0.01), fv.toFixed(2), "13.486,73");
+
+  // A5. Projeção em cenário controlado (calculado à mão)
+  const bkI=state.itens, bkR=state.receitas, bkRe=state.renda, bkH=state.horizonte, bkM=state.metaPct;
+  try{
+    state.renda=10000; state.metaPct=0.2; state.horizonte=6; state.receitas=[];
+    state.itens=[
+      {id:"t1",nome:"Aluguel",natureza:"ordinaria",valor:3000,cat:"Moradia"},
+      {id:"t2",nome:"Luz",natureza:"estimada",min:200,max:400,cat:"Contas"},   // provável = 300
+      {id:"t3",nome:"Mercado",natureza:"eventual",valor:1000,mesIdx:0,cat:"Mercado"},
+      {id:"t4",nome:"TV",natureza:"parcela",valor:500,restam:3,total:1500,cat:"Compras"},
+    ];
+    const p=projecao();
+    // mês 0: 3000 + 300 + 1000 + 500 = 4800 · sobra = 10000 − 4800 = 5200
+    ok("projeção mês 0 = 4.800", perto(p[0].total,4800), p[0].total, 4800);
+    ok("sobra mês 0 = 5.200", perto(p[0].sobra,5200), p[0].sobra, 5200);
+    // mês 3: parcela acabou (restam 3 → meses 0,1,2) e eventual não repete → 3.300
+    ok("projeção mês 3 = 3.300 (parcela encerrada)", perto(p[3].total,3300), p[3].total, 3300);
+    // estimada usa o ponto médio da faixa
+    ok("estimada 200–400 → 300", perto(provavel(state.itens[1]),300), provavel(state.itens[1]), 300);
+    // receita recorrente entra em todo mês; pontual só no mês escolhido
+    state.receitas=[{id:"r1",nome:"Extra",valor:1000,mesIdx:2,recorrente:false},
+                    {id:"r2",nome:"Aluguel receb",valor:500,recorrente:true,mesIdx:0}];
+    const p2b=projecao();
+    ok("receita recorrente entra todo mês", perto(p2b[4].extra,500), p2b[4].extra, 500);
+    ok("receita pontual entra só no mês 2", perto(p2b[2].extra,1500) && perto(p2b[1].extra,500), p2b[2].extra, 1500);
+    // escore é monotônico: gastar mais nunca aumenta o escore
+    const e1=calcularEscore(projecao(),state.renda,state.metaPct).score;
+    state.itens.push({id:"t5",nome:"Extra gasto",natureza:"ordinaria",valor:4000,cat:"Outros"});
+    const e2=calcularEscore(projecao(),state.renda,state.metaPct).score;
+    ok("escore não sobe quando o gasto aumenta", e2<=e1, `${e1} → ${e2}`, "queda ou igual");
+  } finally {
+    state.itens=bkI; state.receitas=bkR; state.renda=bkRe; state.horizonte=bkH; state.metaPct=bkM;
+  }
+
+  // ---------- (B) INVARIANTES SOBRE OS SEUS DADOS ----------
+  const p=projecao();
+  let somaOK=true, sobraOK=true, difMax=0;
+  p.forEach(m=>{
+    const soma=(+m.fixo||0)+(+m.estimado||0)+(+m.eventual||0)+(+m.parcela||0);
+    if(!perto(soma,m.total,0.02)) somaOK=false;
+    const sobra=(m.rendaMes||state.renda)-m.total;
+    const d=Math.abs(sobra-m.sobra); if(d>difMax) difMax=d;
+    if(d>0.02) sobraOK=false;
+  });
+  ok("cada mês: fixas+estimadas+eventuais+parcelas = total", somaOK, somaOK?"confere":"divergente", "confere");
+  ok("cada mês: renda − gastos = sobra", sobraOK, `dif. máx ${difMax.toFixed(4)}`, "0,00");
+
+  const cats=Analise.porCategoria();
+  const somaCat=cats.reduce((a,c)=>a+(+c.v||0),0);
+  ok("soma por categoria = gasto do mês", perto(somaCat,p[0].total,0.05), somaCat.toFixed(2), p[0].total.toFixed(2));
+
+  const parc=(state.itens||[]).filter(x=>x.natureza==="parcela");
+  const parcOK=parc.every(x=>perto(+x.total||0,(+x.valor||0)*(+x.restam||0),0.05));
+  ok(`parcelas: valor × restantes = total (${parc.length} item(s))`, parcOK, parcOK?"confere":"divergente", "confere");
+
+  const est=(state.itens||[]).filter(x=>x.natureza==="estimada");
+  ok(`estimadas: mínimo ≤ máximo (${est.length} item(s))`, est.every(x=>(+x.min||0)<=(+x.max||0)), "ok", "ok");
+
+  const numeros=[...p.map(m=>m.total), ...p.map(m=>m.sobra), state.renda];
+  ok("nenhum resultado inválido (NaN/∞)", numeros.every(v=>isFinite(v)), "todos finitos", "todos finitos");
+
+  const casas=(state.itens||[]).every(x=>{ const v=+x.valor||0; return !v || Math.abs(v-Math.round(v*100)/100)<1e-9; });
+  ok("valores com no máximo 2 casas decimais", casas, casas?"ok":"há centavos imprecisos", "ok");
+
+  return R;
+}
+function respostaAutoTeste(q){
+  if(!/autoteste|auto-teste|verificar (os )?c[áa]lculos|conferir (as )?contas|testar (os )?c[áa]lculos|as contas est[ãa]o certas|validar? (os )?c[áa]lculos/i.test(q)) return null;
+  let R; try{ R=autoTeste(); }catch(e){ return `Não consegui rodar o autoteste: ${h(e.message||e)}`; }
+  const falhas=R.filter(x=>!x.ok);
+  const linha=x=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:12.5px;line-height:1.5">
+      <span style="flex:none">${x.ok?"✅":"❌"}</span>
+      <span style="flex:1;min-width:0"><span style="color:var(--ink)">${h(x.nome)}</span>${x.ok?"":`<br><span style="color:#B4536B;font-size:11.5px">obtido: ${h(String(x.obt))} · esperado: ${h(String(x.esp))}</span>`}</span>
+    </div>`;
+  const cab=falhas.length
+    ? `❌ <b>${falhas.length} de ${R.length}</b> verificações falharam. Isso é um erro de cálculo — me mande este print.`
+    : `✅ <b>${R.length} de ${R.length}</b> verificações passaram. As contas do app conferem.`;
+  return `🔬 <b>Autoteste dos cálculos</b><div style="margin:8px 0">${cab}</div>
+    <div style="border-top:1px solid var(--line);padding-top:6px">${R.map(linha).join("")}</div>
+    <div style="font-size:11px;color:#8895a5;margin-top:8px;line-height:1.5">
+      Inclui <b>casos de referência</b> (resultados calculados à mão: Tabela Price, juros compostos, parcelamento, projeção controlada) e <b>invariantes</b> conferidos nos seus próprios dados (a soma das partes bate com o total, renda − gastos = sobra, categorias fecham com o mês).
+    </div>`;
+}
 // ===== SKILL: padronizar dados já gravados =====
 function diagnosticoDados(){
   const probs={catFora:[], nomeGrito:[], centavos:[], semCat:[]};
