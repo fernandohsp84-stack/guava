@@ -2589,7 +2589,7 @@ function valorItemProp(it){
   if(it._receita) return +it.valor||0;
   return it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
 }
-let propMsg=null; let propCreditos=null;
+let propMsg=null; let propCreditos=null; let propTotais=null;
 // Painel de conferência: soma total (para bater com a fatura), seleção por item
 // e edição da classificação ali mesmo — sem precisar ir na aba Despesas.
 function propostaHTML(){
@@ -2630,8 +2630,20 @@ function propostaHTML(){
   return `<div style="font-size:13.5px;font-weight:700;margin-bottom:2px">Encontrei ${n} ${n===1?"lançamento":"lançamentos"}</div>
     <div style="background:var(--greenSoft);border:1px solid #BFE0D2;border-radius:11px;padding:9px 11px;margin:8px 0 4px">
       <div style="display:flex;justify-content:space-between;font-size:12px;color:#0E7A55"><span>soma de tudo que li</span><b>${fmtV(somaTudo)}</b></div>
-      <div style="font-size:10.5px;color:#5b7a6d;margin-top:3px">${propCreditos?"= suas <b>compras</b> desta fatura":"confira com o total da fatura antes de incluir 👇"}</div>
-      ${propCreditos?`<div style="font-size:10.5px;color:#5b7a6d;margin-top:6px;padding-top:6px;border-top:1px dashed #BFE0D2">↷ deixei de fora <b>${propCreditos.n}</b> linha(s) de pagamento/crédito/estorno. Se sua fatura abate pagamentos do mês anterior, o <b>total impresso será menor</b> que esta soma — o que importa aqui são as compras.</div>`:""}
+      <div style="font-size:10.5px;color:#5b7a6d;margin-top:3px">${propTotais||propCreditos?"= suas <b>compras</b> desta fatura":"confira com o total da fatura antes de incluir 👇"}</div>
+      ${(function(){
+        if(!propTotais) return propCreditos?`<div style="font-size:10.5px;color:#5b7a6d;margin-top:6px;padding-top:6px;border-top:1px dashed #BFE0D2">↷ deixei de fora <b>${propCreditos.n}</b> linha(s) de pagamento/crédito/estorno — elas não são despesa sua.</div>`:"";
+        // CONFERÊNCIA contra os totais que a própria fatura declara
+        const decl=propTotais.somaCartoes||0;
+        const dif=decl?somaTudo-decl:0;
+        const ok=decl&&Math.abs(dif)<0.05;
+        return `<div style="margin-top:7px;padding-top:7px;border-top:1px dashed #BFE0D2;font-size:10.5px;color:#5b7a6d;line-height:1.6">
+          ${decl?`<div style="display:flex;justify-content:space-between"><span>a fatura declara em compras</span><b>${fmtV(decl)}</b></div>
+            <div style="display:flex;justify-content:space-between;color:${ok?"#0E7A55":"#B4536B"}"><span>${ok?"✓ confere com o que li":"⚠️ diferença na leitura"}</span><b>${ok?"":(dif>0?"+":"")+fmtV(dif)}</b></div>`:""}
+          ${propTotais.totalFatura?`<div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:4px;border-top:1px dotted #CFE6DA"><span>total impresso na fatura</span><b>${fmtV(propTotais.totalFatura)}</b></div>
+            <div style="font-size:10px;margin-top:3px">Esse total já <b>desconta pagamentos e créditos</b> (${propCreditos?propCreditos.n:0} linha(s) que deixei de fora). Por isso ele é menor que a soma das compras — e é a soma das compras que entra na sua projeção.</div>`:""}
+        </div>`;
+      })()}
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 0">
       <span style="font-size:11px;color:#8895a5">toque para desmarcar ou trocar o tipo</span>
@@ -2671,8 +2683,9 @@ G.propRestam=(i,v)=>{
   it.total=(+it.valor||0)*it.restam;
   propRefresh();
 };
-function propostaChat(itens, creditos){
+function propostaChat(itens, creditos, totais){
   propCreditos = creditos && creditos.soma>0 ? creditos : null;
+  propTotais = totais && (totais.somaCartoes>0 || totais.totalFatura) ? totais : null;
   // aceita despesas (com natureza) e receitas (com _receita); marca duplicados
   // e já vem tudo selecionado, exceto o que parece repetido
   chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); delete o._src; o._dup=ehDuplicado(o); o._sel=!o._dup; return o; });
@@ -2956,6 +2969,23 @@ async function extrairTextoPDF(file){
 }
 // interpreta linhas de fatura (BB, CAIXA, Nubank...): "DD/MM DESCRIÇÃO ... 1.234,56 [D|C]"
 let ultimoCredito={n:0,soma:0};
+let ultimosTotais=null;
+// A fatura declara os próprios subtotais ("Total final (cartão 6232) 10.785,34D",
+// "Valor total desta fatura R$ 16.716,54"). Capturá-los permite CONFERIR a leitura
+// contra o documento — auditoria, não achismo.
+function capturarTotais(linhas){
+  const t={porCartao:[], somaCartoes:0, totalFatura:null, totaisSecao:[]};
+  linhas.forEach(L=>{
+    const s=String(L);
+    let m=s.match(/total\s+final\s*\(?\s*cart[ãa]o\s*(\d+)\s*\)?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/i);
+    if(m){ const v=parseMoeda(m[2]); t.porCartao.push({cartao:m[1], valor:v}); t.somaCartoes+=v; return; }
+    m=s.match(/(?:valor\s+total\s+desta\s+fatura|total\s+da\s+fatura)\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/i);
+    if(m){ t.totalFatura=parseMoeda(m[1]); return; }
+    m=s.match(/^total\s+(compras(?:\s+parceladas|\s+internacionais)?)\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/i);
+    if(m){ t.totaisSecao.push({secao:m[1], valor:parseMoeda(m[2])}); }
+  });
+  return t;
+}
 // Cada banco escreve a fatura de um jeito. Em vez de tentar uma regra única,
 // detectamos "pistas" no texto e escolhemos como interpretar débito x crédito.
 function perfilDaFatura(linhas){
@@ -2979,6 +3009,7 @@ let perfilAtual=null;
 function parseLinhasFatura(linhas){
   const out=[]; ultimoCredito={n:0,soma:0};
   const perfil=perfilAtual=perfilDaFatura(linhas);
+  ultimosTotais=capturarTotais(linhas);
   // ruído estrutural do documento — nunca é lançamento, em qualquer situação
   const ESTRUTURAL=/saldo|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|limite|vencimento|\bcet\b|d[óo]lar|peso argentino|us\$|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers|parcelamento da fatura|cr[ée]dito rotativo/i;
   // termos que SUGEREM crédito/pagamento — só valem quando a linha NÃO está
@@ -3103,7 +3134,7 @@ async function lerImagemOuPdf(file){
           if(x.parcelaTotal>=2 && x.parcelaAtual>=1) return {nome:x.nome, valor:x.valor, natureza:"parcela", restam:x.parcelaTotal-x.parcelaAtual+1, total:x.valor*x.parcelaTotal, data:x.data};
           return {nome:x.nome, valor:x.valor, data:x.data};
         }));
-        if(itens.length) return {itens, erro:null, creditos:{...ultimoCredito}};
+        if(itens.length) return {itens, erro:null, creditos:{...ultimoCredito}, totais:ultimosTotais?{...ultimosTotais}:null};
         if(linhas.join(" ").length>400) return {itens:[], erro:"li o PDF mas não achei linhas de lançamento no padrão de fatura"};
       }
     }catch(e){ /* segue para a nuvem */ }
@@ -3175,13 +3206,13 @@ async function onChatArquivo(e){
   const rot=ok.map(f=>ehPlan(f)?"📊":f.type==="application/pdf"?"📄":"🖼️").join(" ");
   const um={de:"user", html:`📎 ${ok.length} arquivo(s) enviados ${rot}`}; chatMsgs.push(um); appendChatBubble(um);
   setChatEstado("computing"); mostrarDigitando();
-  let itens=[]; let falhas=0; let ultimoErroArq=null; let credLote={n:0,soma:0};
+  let itens=[]; let falhas=0; let ultimoErroArq=null; let credLote={n:0,soma:0}, totaisLote=null;
   for(let fi=0; fi<ok.length; fi++){
     const f=ok[fi];
     const marcar=arr=>{ (arr||[]).forEach(x=>{ if(x) x._src=fi; }); return arr||[]; };
     try{
       if(ehPlan(f)) itens=itens.concat(marcar(await lerPlanilha(f)));
-      else { const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } if(r.creditos){ credLote.n+=r.creditos.n; credLote.soma+=r.creditos.soma; } itens=itens.concat(marcar(r.itens)); }
+      else { const r=await lerImagemOuPdf(f); if(!r.itens.length){ falhas++; if(r.erro) ultimoErroArq=r.erro; } if(r.creditos){ credLote.n+=r.creditos.n; credLote.soma+=r.creditos.soma; } if(r.totais) totaisLote=r.totais; itens=itens.concat(marcar(r.itens)); }
     }catch(err){ falhas++; if(err&&err.message) ultimoErroArq=err.message; }
   }
   itens=dedupLote(itens);
@@ -3198,7 +3229,7 @@ async function onChatArquivo(e){
         <div style="font-size:11.5px;color:#5b7a6d;margin-top:6px">Eu leio o texto do extrato direto no aparelho — inclusive "Parcela 5 de 10" e as datas dos títulos.</div>
       </div>`};
     chatMsgs.push(m); appendChatBubble(m); return; }
-  propostaChat(itens, credLote);
+  propostaChat(itens, credLote, totaisLote);
 }
 G.chatRapida=(q)=>{
   if(q==="__add"){ G.irParaDe("add"); return; }
