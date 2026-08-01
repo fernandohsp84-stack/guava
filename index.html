@@ -1399,18 +1399,42 @@ function cardVisaoFuturo(p, esc){
   // esticava o eixo e achatava todos os outros meses. Agora o topo do gráfico é
   // definido pelo "corpo" da série (percentil 80) e pela renda; quem passa disso
   // é desenhado no teto, com um marcador que mostra o valor real.
+  // EIXO COM ZONA COMPRIMIDA (tipo "eixo quebrado"):
+  //  · o CORPO da série (a faixa onde a maioria dos meses vive) ocupa ~72% da altura
+  //    → variações de R$ 100 entre meses voltam a ser visíveis;
+  //  · o que passa do corpo (mês atípico, renda muito acima dos gastos) é mapeado
+  //    de forma COMPRIMIDA (logarítmica) nos 28% de cima — continua ordenado e
+  //    visível, mas para de esmagar o resto. Nada é cortado.
   const ord=[...serie].sort((a,b)=>a-b);
   const perc=q=>{ if(!ord.length) return 0; const i=(ord.length-1)*q; const lo=Math.floor(i),hi=Math.ceil(i);
     return ord[lo]+(ord[hi]-ord[lo])*(i-lo); };
-  const p80=perc(0.8), pmin=perc(0.05);
-  const topoBase=Math.max(state.renda, p80)*1.12;
-  const maxV=Math.min(Math.max(...serie)*1.12, Math.max(topoBase, state.renda*1.12));
-  const minV=Math.min(pmin, state.renda)*0.90;
+  const pLo=perc(0.05), pHi=perc(0.80);
+  const maxSerie=Math.max(...serie, state.renda, ...serieRenda);
+  // limites do "corpo": faixa dos meses típicos, com folga de 12%
+  let corpoMin=Math.max(0, pLo*0.92);
+  let corpoMax=pHi*1.12;
+  if(corpoMax-corpoMin < Math.max(corpoMax*0.08, 1)) corpoMax=corpoMin+Math.max(corpoMax*0.08,1); // série quase plana
+  // a linha de renda entra no corpo só se estiver perto dele; senão vai para a zona comprimida
+  if(state.renda<=corpoMax*1.35) corpoMax=Math.max(corpoMax, state.renda*1.06);
+  const TOPO=10;
+  const yBase=H-footH, alturaUtil=yBase-TOPO-4;
+  const hCorpo=alturaUtil*0.72, hComp=alturaUtil-hCorpo;
+  const excedente=Math.max(maxSerie-corpoMax, 0.0001);
   const px=i=>(i/(n-1))*W;
-  const TOPO=10;   // margem superior: nada é desenhado acima disso
-  const pyBruto=v=>(H-footH)-((v-minV)/(maxV-minV||1))*(H-footH-14)+8;
-  const py=v=>Math.max(pyBruto(v), TOPO);   // "achata" o outlier no teto
-  const estourou=i=>serie[i]>maxV;
+  const py=v=>{
+    const val=+v||0;
+    if(val<=corpoMax){
+      const t=(val-corpoMin)/((corpoMax-corpoMin)||1);
+      return yBase - Math.max(0,Math.min(1,t))*hCorpo;
+    }
+    // acima do corpo: compressão logarítmica (mantém a ordem, achata a escala)
+    const t=Math.log1p((val-corpoMax)/excedente*9)/Math.log1p(9);
+    return Math.max(TOPO, yBase - hCorpo - Math.min(1,t)*hComp);
+  };
+  const yCorte=yBase-hCorpo;               // onde começa a zona comprimida
+  const temComprimido=maxSerie>corpoMax*1.02;
+  const estourou=i=>serie[i]>corpoMax;
+  const minV=corpoMin, maxV=corpoMax;      // compatibilidade com o resto do desenho
   function pathDe(vals){
     let d=`M0 ${py(vals[0]).toFixed(1)}`;
     for(let i=1;i<vals.length;i++){
@@ -1488,6 +1512,9 @@ function cardVisaoFuturo(p, esc){
             <stop offset="55%" stop-color="#4CC98F" stop-opacity="0.55"/>
             <stop offset="100%" stop-color="#2FA379" stop-opacity="0.18"/>
           </linearGradient>
+          <pattern id="hachura" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="#BEE3CC" stroke-width="1" opacity=".25"/>
+          </pattern>
           <linearGradient id="gAuroraBlue" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="#5B8BD8" stop-opacity="0.95"/>
             <stop offset="100%" stop-color="#27498F" stop-opacity="0.75"/>
@@ -1498,6 +1525,11 @@ function cardVisaoFuturo(p, esc){
         ${ondaAzul}
         <path d="${linha}" fill="none" stroke="#D8FFE8" stroke-width="2.5" filter="url(#glowTeal)"/>
         ${rendaLine}
+        ${temComprimido?`<g>
+          <rect x="0" y="${TOPO}" width="${W}" height="${(yCorte-TOPO).toFixed(1)}" fill="url(#hachura)" opacity=".5"/>
+          <line x1="0" y1="${yCorte.toFixed(1)}" x2="${W}" y2="${yCorte.toFixed(1)}" stroke="#BEE3CC" stroke-width="1" stroke-dasharray="2 4" opacity=".55"/>
+          <text x="${W-3}" y="${(yCorte-4).toFixed(1)}" fill="#BEE3CC" font-size="7.5" font-weight="700" text-anchor="end" opacity=".8">escala comprimida ↑</text>
+        </g>`:""}
         ${pontos}${pico}${marcasExtra}${marcasEstouro}
         ${p.map((x,i)=>{ const meia=(W/Math.max(n-1,1))/2; const X=px(i)-meia;
           return `<rect x="${Math.max(X,0).toFixed(1)}" y="0" width="${(meia*2).toFixed(1)}" height="${H-footH}" fill="transparent" style="cursor:pointer" onclick="_g.verMes(${i})"><title>${x.mes}/${x.ano} — toque para ver o mês</title></rect>`;
