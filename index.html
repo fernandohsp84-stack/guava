@@ -3420,8 +3420,13 @@ function parseLinhasFatura(linhas){
   const out=[]; ultimoCredito={n:0,soma:0};
   const perfil=perfilAtual=perfilDaFatura(linhas);
   ultimosTotais=capturarTotais(linhas);
-  // ruído estrutural do documento — nunca é lançamento, em qualquer situação
-  const ESTRUTURAL=/saldo|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|limite|vencimento|\bcet\b|d[óo]lar|peso argentino|us\$|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers|parcelamento da fatura|cr[ée]dito rotativo/i;
+  // ruído estrutural do documento — nunca é lançamento, em qualquer situação.
+  // ATENÇÃO: os termos de câmbio (dólar, peso, US$) precisam ser PRECISOS para não
+  // engolir estabelecimentos legítimos. Ex.: "DUTY FREE SHOP DOLARES EZEIZA" é uma
+  // COMPRA — não pode casar com o filtro de "Cotação do Dólar". Por isso casamos
+  // apenas as formas reais das linhas de ruído de compra internacional:
+  //   "*** 494.845,23 PESO ARGENTINO" / "equivalente a US$ 350,56" / "Cotação do Dólar de..."
+  const ESTRUTURAL=/saldo|total\b|subtotal|cota[çc][ãa]o|equivalente a|encargos|limite|vencimento|\bcet\b|cota[çc][ãa]o do d[óo]lar|\d[\d.,]*\s*pesos?\s+argentino|\bus\$\s*[\d.]|melhor data|fatura anterior|demonstrativo|descri[çc][ãa]o|cidade\/pa[íi]s|programa de pontos|fator convers|parcelamento da fatura|cr[ée]dito rotativo/i;
   // termos que SUGEREM crédito/pagamento — só valem quando a linha NÃO está
   // marcada como débito. "PAGAMENTO*MBB ... 300,96D" é um estabelecimento, não
   // um pagamento de fatura; o marcador D/C do banco tem a palavra final.
@@ -3505,8 +3510,19 @@ function parseLinhasFatura(linhas){
     if(!jaViuInicio) continue;
     if(!dentro) continue;
     if(L.length<6) continue;
-    if(RESUMO.test(L.trim())) continue;      // linha de resumo dentro da área
-    if(ESTRUTURAL.test(L)) continue;
+    // BLINDAGEM (apenas faturas SEM sufixo D/C, como BB/Nubank; a CAIXA já tem o
+    // pré-passo acima): uma linha que COMEÇA com data (DD/MM) e TERMINA em valor é
+    // um lançamento real — mesmo que o nome do estabelecimento contenha uma palavra
+    // que também aparece no ruído (ex.: "DUTY FREE SHOP DOLARES EZEIZA"). Sem isto,
+    // o filtro ESTRUTURAL engolia essas compras.
+    const ehTransacao = !perfil.sufixoDC
+      && /^\s*\d{1,2}\/\d{1,2}\b/.test(L)
+      && /\d{1,3}(?:\.\d{3})*,\d{2}\s*[DC\-]?\s*$/.test(L)
+      && !RESUMO.test(L.trim());
+    if(!ehTransacao){
+      if(RESUMO.test(L.trim())) continue;      // linha de resumo dentro da área
+      if(ESTRUTURAL.test(L)) continue;
+    }
     // valor no fim: 1.234,56 ou 123,45, sufixo opcional D (débito) / C (crédito)
     let mv=L.match(/(?:R\$\s*)?(-?)\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC\-])?\s*$/);
     // No app, valor e nome ficam em linhas separadas ("Centauro" / "R$ 86,65").
