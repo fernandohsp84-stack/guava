@@ -999,6 +999,30 @@ G.setHor=h=>{ state.horizonte=h; salvar(); render(); window.scrollTo(0,0); };
 G.setMeta=x=>{ state.metaPct=x; salvar(); render(); };
 G.setFiltro=g=>{ filtroDesp=g; render(); };
 G.setModo=k=>{ modoAdd=k; ouvindo=false; render(); };
+// ===== RESET DE DESPESAS =====================================================
+// Exclui TODAS as despesas incluídas e recomeça a inclusão. Acionável pela aba
+// Despesas (botão) ou pelo GuavAI ("zerar todas as despesas"). Limpa também as
+// marcações de pagamento do mês e a lista da sessão, e sincroniza (local+nuvem)
+// via salvar(). Ação destrutiva: sempre confirma antes.
+G.resetDespesas=(confirmado)=>{
+  const n=(state.itens||[]).length;
+  if(!n){ if(typeof toast==="function") toast("Não há despesas para zerar."); return; }
+  if(!confirmado){
+    if(!confirm(`Excluir TODAS as ${n} despesas e recomeçar do zero?\n\nEssa ação não pode ser desfeita.`)) return;
+  }
+  state.itens=[];
+  state.pagosMes={};
+  try{ ultimosLancamentos.length=0; }catch(e){}
+  editandoId=null;
+  salvar();          // persiste local + Firebase
+  render();
+  window.scrollTo(0,0);
+  if(typeof toast==="function") toast(`${n} despesa(s) excluída(s). Recomece a inclusão. 🌿`);
+};
+G.resetDespesasCancelar=()=>{
+  const m={de:"ia", html:"Sem problema — <b>não</b> excluí nada. Suas despesas continuam intactas. 🌿"};
+  chatMsgs.push(m); appendChatBubble(m);
+};
 
 // PATCH: só re-anima a troca de tela quando o usuário realmente muda de aba.
 // Antes, TODO render() (marcar como pago, editar campo, digitar renda, incluir
@@ -1990,6 +2014,15 @@ G.chatEnviar=async()=>{
   if(/incluir mesmo assim|inclua mesmo assim|pode incluir assim mesmo|for[çc]ar inclus[ãa]o|incluir duplicad/i.test(low)){
     if(chatProposta && chatProposta.some(x=>x._dup)){ G.chatIncluirProposta(true); return; }
     const m={de:"ia", html:"Não há itens pendentes marcados como duplicados agora. Me envie o lançamento que você quer incluir."};
+    chatMsgs.push(m); appendChatBubble(m); return;
+  }
+
+  // --- 0r) RESET — zerar todas as despesas e recomeçar a inclusão ---
+  if(/\b(zerar|apagar|excluir|limpar|resetar|recome[çc]ar|come[çc]ar de novo|do zero)\b/i.test(low)
+     && /\b(despesas?|gastos?|lan[çc]amentos?|tudo|itens|inclus[õo]es?)\b/i.test(low)){
+    const n=(state.itens||[]).length;
+    if(!n){ const m={de:"ia", html:"Não há despesas para zerar — sua lista já está vazia. 🌿"}; chatMsgs.push(m); appendChatBubble(m); return; }
+    const m={de:"ia", html:`Você tem <b>${n}</b> despesa(s) registrada(s). Isso vai <b>excluir todas</b> e recomeçar do zero — não dá para desfazer.<div style="display:flex;gap:8px;margin-top:10px"><button onclick="_g.resetDespesas(true)" style="flex:1;background:#B4536B;border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Sim, zerar tudo</button><button onclick="_g.resetDespesasCancelar()" style="flex:1;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Cancelar</button></div>`};
     chatMsgs.push(m); appendChatBubble(m); return;
   }
 
@@ -3174,6 +3207,8 @@ function parseLinhasFatura(linhas){
   const modoApp=!temCabecalho;
   // ruído típico de tela de app
   const RUIDO_APP=/^(cart[ãa]o virtual|final \d+|processando|pagar fatura|faturas?|jul|ago|set|out|nov|dez|jan|fev|mar|abr|mai|jun|ver fatura|parcelas de compras anteriores|pode antecipar|\d{1,2}:\d{2})\b/i;
+  // sufixos de cidade/país removidos da descrição (compartilhado com o pré-passo CAIXA)
+  const CIDADE=/\s+(BR|AR|US|CL|UY|BRASILIA|SAO PAULO|OSASCO|BARUERI|CURITIBA|PINHAIS|CRUZEIRO|GUARULHOS|SOROCABA|EZEIZA|RIO DE JANEIR[O]?|CAPITAL FEDER|VILLA LA ANGO|PALMITAL DE M|XIAMEN|ITAJAI|GUARIBA|CAMPINAS|BELO HORIZONT|SAN FRANCISCO|Asa Sul|Bras[íi]lia|Sao Paulo)\s*$/i;
   let dentro=modoApp, jaViuInicio=modoApp, dataCorrente=null;
   for(let li=0; li<linhas.length; li++){
     let L=linhas[li];
@@ -3186,6 +3221,51 @@ function parseLinhasFatura(linhas){
       if(RUIDO_APP.test(String(L).trim())) continue;
     }
     if(!L) continue;
+    // === CAIXA (layout de 2 colunas) ===================================
+    // O PDF da CAIXA intercala caixas laterais ("Programa de Pontos",
+    // "Saldo Anterior 2932", "Encargos"...) NO MEIO da lista de compras,
+    // grudando esse texto como PREFIXO de linhas de lançamento reais:
+    //   "Programa de Pontos 25/07 MP *LOTERIAS... 42,00D"
+    //   "Saldo Anterior 2932 29/07 MP *LOTERIAS... 42,00D"
+    //   "crédito. 07/08 MP *LOTERIAS... 42,00D"
+    // Antes, o FIM ("programa de pontos"/"guia de consumo") encerrava a
+    // seção nessas linhas e TODAS as compras seguintes eram perdidas
+    // (era a origem da "diferença na leitura"). A âncora confiável é a
+    // ÚLTIMA data DD/MM da linha seguida de valor com sufixo D/C: dela em
+    // diante temos o lançamento verdadeiro; à esquerda é ruído lateral.
+    if(perfil.sufixoDC){
+      const mTx=L.match(/.*?(\d{1,2}\/\d{1,2}\s+.+?\s+\d{1,3}(?:\.\d{3})*,\d{2}\s*[DC])\s*$/);
+      if(mTx){
+        const cand=mTx[1].replace(/^\s*\d{1,2}\/\d{1,2}\s+/,"").trim();
+        // não é subtotal/resumo disfarçado ("Total final (cartão X) ...D")
+        if(!RESUMO.test(cand) && !/^(total|saldo|isento|anuidade)\b/i.test(cand)){
+          L=mTx[1];                 // reescreve a linha começando na transação
+          if(!jaViuInicio){ jaViuInicio=true; dentro=true; }
+          // esta linha É um lançamento: processa aqui e pula os guardas
+          const mv0=L.match(/(?:R\$\s*)?(-?)\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*([DC\-])?\s*$/);
+          if(mv0){
+            const v0=parseMoeda(mv0[2]);
+            const cred0 = mv0[1]==="-" || mv0[3]==="C" || mv0[3]==="-";
+            if(cred0){ if(v0>0){ ultimoCredito.n++; ultimoCredito.soma+=v0; } continue; }
+            if(mv0[3]!=="D" && SUSPEITAS.test(L)){ if(v0>0){ ultimoCredito.n++; ultimoCredito.soma+=v0; } continue; }
+            if(!(v0>0) || v0>200000) continue;
+            let d0=L.slice(0,mv0.index).trim();
+            const mdd=d0.match(/^[^A-Za-z0-9]*(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s*/);
+            const dl0=mdd?mdd[1]:null;
+            d0=d0.replace(/^[^A-Za-z0-9]*\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s*/,"");
+            let a2; do{ a2=d0; d0=d0.replace(CIDADE,"").trim(); }while(d0!==a2);
+            if(!d0 || d0.length<2) continue;
+            let pa=null,pt=null;
+            const mpp=d0.match(/(?:PARC\.?\s*)?(\d{1,2})\s*(?:DE|\/|\s)\s*(\d{1,2})\s*$/i);
+            if(mpp){ const a=+mpp[1],tt=+mpp[2]; if(tt>=2&&tt<=48&&a>=1&&a<=tt){ pa=a; pt=tt; d0=d0.slice(0,mpp.index).replace(/[\s\-–—]+$/,"").trim(); } }
+            if(!d0) d0="Lançamento da fatura";
+            out.push({nome:d0, valor:v0, parcelaAtual:pa, parcelaTotal:pt, data:dl0});
+          }
+          continue;
+        }
+      }
+    }
+    // ===================================================================
     if(INICIO.test(L)){ dentro=true; jaViuInicio=true; continue; }
     if(dentro && FIM.test(L)){ dentro=false; continue; }
     // enquanto não apareceu nenhum cabeçalho de lançamentos, ignoramos tudo
@@ -3230,7 +3310,6 @@ function parseLinhasFatura(linhas){
     const dataLinha=mdata?mdata[1]:null;
     desc=desc.replace(/^[^A-Za-z0-9]*\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s*/,"");
     // remove sufixos de cidade/país em laço ("... SAO PAULO BR" tem 2 tokens)
-    const CIDADE=/\s+(BR|AR|US|CL|UY|BRASILIA|SAO PAULO|OSASCO|BARUERI|CURITIBA|PINHAIS|CRUZEIRO|GUARULHOS|SOROCABA|EZEIZA|RIO DE JANEIR[O]?|CAPITAL FEDER|VILLA LA ANGO|PALMITAL DE M|Asa Sul|Bras[íi]lia|Sao Paulo)\s*$/i;
     let antes; do{ antes=desc; desc=desc.replace(CIDADE,"").trim(); }while(desc!==antes);
     if(!desc || desc.length<2) continue;
     // parcela: "02 DE 12", "01/03", "PARC 01/03", "02DE12"
@@ -3984,7 +4063,12 @@ function viewDespesas(){
     </div>
   </div>`;
   const cards=vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">Nenhuma despesa aqui. Use ➕ Adicionar.</div>`;
-  return `<div style="padding-top:16px"><h2 style="margin-bottom:12px">Despesas</h2>
+  const totalItens=(state.itens||[]).length;
+  const btnReset=totalItens?`<button onclick="_g.resetDespesas(false)" title="Excluir todas as despesas e recomeçar" style="background:#fff;border:1.5px solid #E3C2CC;color:#B4536B;font-size:12px;font-weight:700;padding:7px 12px;border-radius:9px;white-space:nowrap">↺ Zerar despesas</button>`:"";
+  return `<div style="padding-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Despesas</h2>${btnReset}
+    </div>
     ${cab}
     <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px">${pills}</div>${cards}</div>`;
 }
