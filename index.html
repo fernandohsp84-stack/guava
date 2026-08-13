@@ -1003,25 +1003,125 @@ G.setModo=k=>{ modoAdd=k; ouvindo=false; render(); };
 // Exclui TODAS as despesas incluídas e recomeça a inclusão. Acionável pela aba
 // Despesas (botão) ou pelo GuavAI ("zerar todas as despesas"). Limpa também as
 // marcações de pagamento do mês e a lista da sessão, e sincroniza (local+nuvem)
-// via salvar(). Ação destrutiva: sempre confirma antes.
+// via salvar(). Ação destrutiva.
+// IMPORTANTE: o chat é um overlay fixo (#chatOv) FORA do fluxo de render(). Quando
+// o reset parte do chat, render() sozinho reconstrói só o #app por baixo — o
+// usuário não vê nada acontecer. Por isso, se o chat estiver aberto, confirmamos
+// com um balão e desabilitamos os botões da mensagem anterior.
 G.resetDespesas=(confirmado)=>{
+  try{ pendingIntent=null; }catch(e){}
   const n=(state.itens||[]).length;
-  if(!n){ if(typeof toast==="function") toast("Não há despesas para zerar."); return; }
-  if(!confirmado){
+  const noChat=!!document.getElementById("chatOv");
+  if(!n){
+    if(noChat){ const m={de:"ia", html:"Não há despesas para zerar — sua lista já está vazia. 🌿"}; chatMsgs.push(m); appendChatBubble(m); }
+    return;
+  }
+  // Confirmação: no chat os botões JÁ são a confirmação (confirmado=true).
+  // Fora do chat (aba Despesas), usamos o confirm() nativo.
+  if(!confirmado && !noChat){
     if(!confirm(`Excluir TODAS as ${n} despesas e recomeçar do zero?\n\nEssa ação não pode ser desfeita.`)) return;
   }
+  // executa o reset
   state.itens=[];
   state.pagosMes={};
-  try{ ultimosLancamentos.length=0; }catch(e){}
+  try{ if(typeof ultimosLancamentos!=="undefined" && ultimosLancamentos) ultimosLancamentos.length=0; }catch(e){}
   editandoId=null;
-  salvar();          // persiste local + Firebase
-  render();
-  window.scrollTo(0,0);
-  if(typeof toast==="function") toast(`${n} despesa(s) excluída(s). Recomece a inclusão. 🌿`);
+  try{ if(typeof chatProposta!=="undefined") chatProposta=null; }catch(e){}   // descarta prévia pendente
+  salvar();                        // persiste local + Firebase
+  render();                        // reconstrói o #app por baixo
+  if(noChat){
+    // neutraliza os botões da mensagem de confirmação anterior (evita clique repetido)
+    const ov=document.getElementById("chatOv");
+    if(ov) ov.querySelectorAll('button[onclick*="resetDespesas(true)"],button[onclick*="resetDespesasCancelar"]').forEach(b=>{
+      b.setAttribute("disabled",""); b.style.opacity=".45"; b.style.pointerEvents="none";
+    });
+    const m={de:"ia", html:`✅ Pronto — excluí <b>${n}</b> despesa(s). Sua lista está zerada e a projeção foi recalculada.<br>Pode recomeçar a inclusão agora: me diga um gasto (<i>“mercado 450”</i>), envie a fatura em <b>PDF/foto</b> 📎, ou use <b>➕ Abrir Adicionar</b>.`};
+    chatMsgs.push(m); appendChatBubble(m);
+  } else {
+    window.scrollTo(0,0);
+  }
 };
 G.resetDespesasCancelar=()=>{
+  neutralizarBotoesReset();
   const m={de:"ia", html:"Sem problema — <b>não</b> excluí nada. Suas despesas continuam intactas. 🌿"};
   chatMsgs.push(m); appendChatBubble(m);
+};
+G.resetReceitasCancelar=()=>{
+  pendingIntent=null; neutralizarBotoesReset();
+  const m={de:"ia", html:"Ok — <b>não</b> mexi nas suas receitas. 🌿"};
+  chatMsgs.push(m); appendChatBubble(m);
+};
+// desativa quaisquer botões de reset ainda visíveis no chat (evita clique repetido)
+function neutralizarBotoesReset(){
+  const ov=document.getElementById("chatOv"); if(!ov) return;
+  ov.querySelectorAll('button[onclick*="reset"]').forEach(b=>{
+    if(/reset/i.test(b.getAttribute("onclick")||"")){ b.setAttribute("disabled",""); b.style.opacity=".45"; b.style.pointerEvents="none"; }
+  });
+}
+// mapeia mês(1-12)+ano para o offset usado em receitas (mesIdx: 0 = mês atual)
+function idxDoMesAno(mes1a12, ano){
+  const now=new Date(); const baseA=now.getFullYear(), baseM=now.getMonth(); // 0-11
+  const alvoA = ano!=null ? ano : baseA;
+  let idx=(alvoA-baseA)*12 + ((mes1a12-1)-baseM);
+  // se não veio ano e o mês já passou este ano, assume o próximo cispano
+  if(ano==null && idx<0) idx+=12;
+  return idx;
+}
+// ===== RESET DE RECEITAS EXTRAS =============================================
+// Limpa receitas extras (todas, ou só de um mês). Conserta o "gráfico fantasma":
+// zerar despesas NÃO tocava em state.receitas, então os marcadores dourados e o
+// card Comportamento continuavam mostrando renda extra que o usuário achava
+// já removida.
+G.resetReceitasMes=(mesIdx, ano, confirmado)=>{
+  try{ pendingIntent=null; }catch(e){}
+  const noChat=!!document.getElementById("chatOv");
+  const alvo=(state.receitas||[]).filter(r=>!r.recorrente && (+r.mesIdx||0)===(+mesIdx||0));
+  const n=alvo.length, soma=alvo.reduce((s,r)=>s+(+r.valor||0),0);
+  const rotulo=mesLabelIdx(mesIdx);
+  if(!n){ if(noChat){ const m={de:"ia", html:`Não encontrei receitas extras em <b>${rotulo}</b> para limpar. 🌿`}; chatMsgs.push(m); appendChatBubble(m);} return; }
+  if(!confirmado && !noChat){ if(!confirm(`Excluir ${n} receita(s) extra(s) de ${rotulo} (R$ ${soma.toLocaleString("pt-BR",{minimumFractionDigits:2})})?`)) return; }
+  state.receitas=(state.receitas||[]).filter(r=>!(!r.recorrente && (+r.mesIdx||0)===(+mesIdx||0)));
+  salvar(); render();
+  if(noChat){ neutralizarBotoesReset();
+    const m={de:"ia", html:`✅ Pronto — removi <b>${n}</b> receita(s) extra(s) de <b>${rotulo}</b> (R$ ${soma.toLocaleString("pt-BR",{minimumFractionDigits:2})}). O gráfico e a projeção já não mostram mais essa renda extra.`};
+    chatMsgs.push(m); appendChatBubble(m);
+  } else window.scrollTo(0,0);
+};
+G.resetReceitas=(confirmado)=>{
+  try{ pendingIntent=null; }catch(e){}
+  const noChat=!!document.getElementById("chatOv");
+  const n=(state.receitas||[]).length;
+  if(!n){ if(noChat){ const m={de:"ia", html:"Você não tem receitas extras cadastradas. 🌿"}; chatMsgs.push(m); appendChatBubble(m);} return; }
+  if(!confirmado && !noChat){ if(!confirm(`Excluir TODAS as ${n} receitas extras?`)) return; }
+  state.receitas=[];
+  salvar(); render();
+  if(noChat){ neutralizarBotoesReset();
+    const m={de:"ia", html:`✅ Pronto — removi todas as <b>${n}</b> receita(s) extra(s). O gráfico e a projeção voltaram à renda base.`};
+    chatMsgs.push(m); appendChatBubble(m);
+  } else window.scrollTo(0,0);
+};
+G.resetTudo=(confirmado)=>{
+  try{ pendingIntent=null; }catch(e){}
+  const noChat=!!document.getElementById("chatOv");
+  const nd=(state.itens||[]).length, nr=(state.receitas||[]).length;
+  if(!nd && !nr){ if(noChat){ const m={de:"ia", html:"Não há despesas nem receitas para limpar — já está tudo zerado. 🌿"}; chatMsgs.push(m); appendChatBubble(m);} return; }
+  if(!confirmado && !noChat){ if(!confirm(`Excluir TODAS as ${nd} despesas e ${nr} receitas extras e recomeçar do zero?`)) return; }
+  state.itens=[]; state.receitas=[]; state.pagosMes={};
+  try{ if(typeof ultimosLancamentos!=="undefined" && ultimosLancamentos) ultimosLancamentos.length=0; }catch(e){}
+  try{ if(typeof chatProposta!=="undefined") chatProposta=null; }catch(e){}
+  editandoId=null;
+  salvar(); render();
+  if(noChat){ neutralizarBotoesReset();
+    const m={de:"ia", html:`✅ Pronto — zerei <b>${nd}</b> despesa(s) e <b>${nr}</b> receita(s) extra(s). Gráfico e projeção recomeçam do zero.`};
+    chatMsgs.push(m); appendChatBubble(m);
+  } else window.scrollTo(0,0);
+};
+// atalho dos botões "escopo" (quando o reset veio sem alvo definido)
+G.confirmarReset=(tipo)=>{
+  neutralizarBotoesReset();
+  if(tipo==="despesas") return void G.resetDespesas(true);
+  if(tipo==="receitas") return void G.resetReceitas(true);
+  if(tipo==="tudo")     return void G.resetTudo(true);
 };
 
 // PATCH: só re-anima a troca de tela quando o usuário realmente muda de aba.
@@ -2017,12 +2117,45 @@ G.chatEnviar=async()=>{
     chatMsgs.push(m); appendChatBubble(m); return;
   }
 
-  // --- 0r) RESET — zerar todas as despesas e recomeçar a inclusão ---
-  if(/\b(zerar|apagar|excluir|limpar|resetar|recome[çc]ar|come[çc]ar de novo|do zero)\b/i.test(low)
-     && /\b(despesas?|gastos?|lan[çc]amentos?|tudo|itens|inclus[õo]es?)\b/i.test(low)){
-    const n=(state.itens||[]).length;
-    if(!n){ const m={de:"ia", html:"Não há despesas para zerar — sua lista já está vazia. 🌿"}; chatMsgs.push(m); appendChatBubble(m); return; }
-    const m={de:"ia", html:`Você tem <b>${n}</b> despesa(s) registrada(s). Isso vai <b>excluir todas</b> e recomeçar do zero — não dá para desfazer.<div style="display:flex;gap:8px;margin-top:10px"><button onclick="_g.resetDespesas(true)" style="flex:1;background:#B4536B;border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Sim, zerar tudo</button><button onclick="_g.resetDespesasCancelar()" style="flex:1;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Cancelar</button></div>`};
+  // --- 0p) CONFIRMAÇÃO de uma intenção pendente ---------------------------
+  // Se o GuavAI acabou de perguntar "quer que eu limpe...?" e o usuário responde
+  // curto ("sim", "pode", "favor limpar", "isso"), executamos a ação pendente.
+  // Isso conserta a perda de contexto: antes, "Favor limpar" (sem dizer o quê)
+  // caía no fallback de "limpar o chat".
+  const confirmaCurto = /^(sim|pode|pode sim|isso|isso mesmo|claro|ok|okay|beleza|favor(?:\s+(?:limpar|apagar|excluir|zerar))?|por favor|manda|manda ver|vai|faz|fa[çc]a|confirmo|confirmar|limpar|apagar|excluir|zerar|pode limpar|pode apagar|pode excluir|pode zerar)\b/i.test(low.trim());
+  if(pendingIntent && confirmaCurto){
+    const pi=pendingIntent; pendingIntent=null;
+    if(pi.tipo==="resetReceitasMes"){ G.resetReceitasMes(pi.dados.mesIdx, pi.dados.ano, true); return; }
+    if(pi.tipo==="resetReceitas"){ G.resetReceitas(true); return; }
+    if(pi.tipo==="resetDespesas"){ G.resetDespesas(true); return; }
+    if(pi.tipo==="resetTudo"){ G.resetTudo(true); return; }
+  }
+  const nega = /^(n[ãa]o|nao|cancela|cancelar|deixa|deixe|para|pare|melhor n[ãa]o|agora n[ãa]o)\b/i.test(low.trim());
+  if(pendingIntent && nega){ pendingIntent=null; const m={de:"ia", html:"Sem problema — não vou mexer em nada. 🌿"}; chatMsgs.push(m); appendChatBubble(m); return; }
+
+  // --- 0r) RESET explícito (despesas, receitas extras, ou tudo) -----------
+  const verboReset=/\b(zerar|apagar|excluir|limpar|resetar|recome[çc]ar|come[çc]ar de novo|do zero)\b/i.test(low);
+  if(verboReset){
+    const falaReceita=/\breceitas?\b|\bganhos?\b|\brecebimentos?\b|\bextras?\b/i.test(low);
+    const falaDespesa=/\bdespesas?\b|\bgastos?\b|\blan[çc]amentos?\b|\bitens\b|\binclus[õo]es?\b/i.test(low);
+    const falaTudo   =/\btudo\b|\bgeral\b|\bcompleto\b|todos os dados/i.test(low);
+    // detecta mês citado ("setembro", "de setembro 2026")
+    const mAno=low.match(/\b(20\d{2})\b/); const anoAlvo=mAno?+mAno[1]:null;
+    let mesAlvo=null; const mm=low.match(/\b(janeiro|fevereiro|mar[çc]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i);
+    if(mm){ const mi=mesParaNumero(mm[1]); if(mi) mesAlvo=mi; }
+
+    // (a) "limpar as receitas extras de setembro 2026"
+    if(falaReceita && !falaDespesa){
+      if(mesAlvo){ const idx=idxDoMesAno(mesAlvo, anoAlvo); return void confirmarResetReceitasMes(idx); }
+      return void confirmarResetReceitas();
+    }
+    // (b) "zerar tudo"
+    if(falaTudo && !falaDespesa && !falaReceita){ return void confirmarResetTudo(); }
+    // (c) "zerar despesas" (inclui quando cita despesa e receita juntos → tudo)
+    if(falaDespesa && falaReceita){ return void confirmarResetTudo(); }
+    if(falaDespesa){ return void confirmarResetDespesas(); }
+    // (d) verbo de reset sem alvo claro → pergunta o escopo
+    const m={de:"ia", html:`Quer que eu limpe o quê?<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px"><button onclick="_g.confirmarReset('despesas')" style="background:#fff;border:1.5px solid #E3C2CC;color:#B4536B;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Só as despesas</button><button onclick="_g.confirmarReset('receitas')" style="background:#fff;border:1.5px solid #E3C2CC;color:#B4536B;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Só as receitas extras</button><button onclick="_g.confirmarReset('tudo')" style="background:#B4536B;border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Tudo (despesas + receitas)</button></div>`};
     chatMsgs.push(m); appendChatBubble(m); return;
   }
 
@@ -2763,6 +2896,44 @@ function lancamentosDoTexto(q){
 function h(x){ return String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 let chatProposta=null;
 let ultimosLancamentos=[]; // resumo do que foi incluído nesta conversa (p/ "você incluiu?")
+// Intenção pendente: quando o GuavAI FAZ uma pergunta de ação ("quer que eu limpe
+// essas receitas?"), guardamos aqui o que ele vai fazer se o usuário confirmar.
+// Assim um simples "sim"/"pode"/"favor limpar" resolve a ação certa, sem perder o
+// contexto e sem cair no fallback de "limpar o chat".
+let pendingIntent=null; // {tipo:'resetReceitasMes'|'resetDespesas'|..., dados:{...}, resumo:string}
+// Estes helpers postam a pergunta de confirmação COM botões e, ao mesmo tempo,
+// registram a intenção pendente — então tanto o clique no botão quanto um simples
+// "sim"/"pode limpar" na próxima mensagem executam a ação certa.
+function confirmarResetReceitasMes(mesIdx){
+  const rot=mesLabelIdx(mesIdx);
+  const alvo=(state.receitas||[]).filter(r=>!r.recorrente && (+r.mesIdx||0)===(+mesIdx||0));
+  const n=alvo.length, soma=alvo.reduce((s,r)=>s+(+r.valor||0),0);
+  if(!n){ const m={de:"ia", html:`Não encontrei receitas extras em <b>${rot}</b> para limpar. 🌿`}; chatMsgs.push(m); appendChatBubble(m); return; }
+  pendingIntent={tipo:"resetReceitasMes", dados:{mesIdx}};
+  const m={de:"ia", html:`Encontrei <b>${n}</b> receita(s) extra(s) em <b>${rot}</b> somando <b>R$ ${soma.toLocaleString("pt-BR",{minimumFractionDigits:2})}</b>. Quer que eu limpe?<div style="display:flex;gap:8px;margin-top:10px"><button onclick="_g.resetReceitasMes(${mesIdx},null,true)" style="flex:1;background:#B4536B;border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Sim, limpar</button><button onclick="_g.resetReceitasCancelar()" style="flex:1;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Cancelar</button></div>`};
+  chatMsgs.push(m); appendChatBubble(m);
+}
+function confirmarResetReceitas(){
+  const n=(state.receitas||[]).length;
+  if(!n){ const m={de:"ia", html:"Você não tem receitas extras cadastradas. 🌿"}; chatMsgs.push(m); appendChatBubble(m); return; }
+  pendingIntent={tipo:"resetReceitas"};
+  const m={de:"ia", html:`Você tem <b>${n}</b> receita(s) extra(s). Quer que eu limpe todas?<div style="display:flex;gap:8px;margin-top:10px"><button onclick="_g.resetReceitas(true)" style="flex:1;background:#B4536B;border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Sim, limpar todas</button><button onclick="_g.resetReceitasCancelar()" style="flex:1;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Cancelar</button></div>`};
+  chatMsgs.push(m); appendChatBubble(m);
+}
+function confirmarResetDespesas(){
+  const n=(state.itens||[]).length;
+  if(!n){ const m={de:"ia", html:"Não há despesas para zerar — sua lista já está vazia. 🌿"}; chatMsgs.push(m); appendChatBubble(m); return; }
+  pendingIntent={tipo:"resetDespesas"};
+  const m={de:"ia", html:`Você tem <b>${n}</b> despesa(s) registrada(s). Isso vai <b>excluir todas</b> e recomeçar do zero — não dá para desfazer.<div style="display:flex;gap:8px;margin-top:10px"><button onclick="_g.resetDespesas(true)" style="flex:1;background:#B4536B;border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Sim, zerar tudo</button><button onclick="_g.resetDespesasCancelar()" style="flex:1;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Cancelar</button></div>`};
+  chatMsgs.push(m); appendChatBubble(m);
+}
+function confirmarResetTudo(){
+  const nd=(state.itens||[]).length, nr=(state.receitas||[]).length;
+  if(!nd && !nr){ const m={de:"ia", html:"Não há despesas nem receitas para limpar — já está tudo zerado. 🌿"}; chatMsgs.push(m); appendChatBubble(m); return; }
+  pendingIntent={tipo:"resetTudo"};
+  const m={de:"ia", html:`Isso vai excluir <b>${nd}</b> despesa(s) e <b>${nr}</b> receita(s) extra(s) e recomeçar do zero — não dá para desfazer.<div style="display:flex;gap:8px;margin-top:10px"><button onclick="_g.resetTudo(true)" style="flex:1;background:#B4536B;border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Sim, zerar tudo</button><button onclick="_g.resetDespesasCancelar()" style="flex:1;background:#fff;border:1.5px solid var(--line);color:var(--mute);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Cancelar</button></div>`};
+  chatMsgs.push(m); appendChatBubble(m);
+}
 function valorItemProp(it){
   if(it._receita) return +it.valor||0;
   return it.natureza==="estimada" ? provavel(it) : (+it.valor||0);
@@ -2791,14 +2962,14 @@ function propostaHTML(){
            ${Object.keys(NAT_LABEL).map(k=>`<option value="${k}" ${it.natureza===k?"selected":""}>${NAT_LABEL[k].split(" ")[0]}</option>`).join("")}
          </select>
          ${it.natureza==="parcela"?`<span style="font-size:10.5px;color:#8895a5">restam <input type="number" min="1" max="60" value="${+it.restam||1}" onchange="_g.propRestam(${i},this.value)" style="width:42px;font-size:11px;padding:2px 4px;border:1px solid #dde3e9;border-radius:6px;text-align:center">x</span>`:""}`;
-    return `<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px solid #eef1f4;${it._sel?"":"opacity:.45"}">
-      <input type="checkbox" ${it._sel?"checked":""} onchange="_g.propSel(${i},this.checked)" style="width:19px;height:19px;flex:none;margin-top:1px;accent-color:#0E7A55">
-      <div style="flex:1;min-width:0">
+    return `<div id="propRow${i}" style="display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-top:1px solid #eef1f4;${it._sel?"":"opacity:.45"}">
+      <input id="propCb${i}" type="checkbox" ${it._sel?"checked":""} onclick="_g.propSel(${i},this.checked)" style="width:22px;height:22px;flex:none;margin-top:1px;accent-color:#0E7A55">
+      <div style="flex:1;min-width:0" onclick="var c=document.getElementById('propCb${i}');if(c){c.checked=!c.checked;_g.propSel(${i},c.checked);}">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
           <span style="font-size:12.5px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${h(it.nome)}</span>
           <b style="font-size:12.5px;white-space:nowrap;color:${it._receita?"var(--emerald)":"var(--ink)"}">${it._receita?"+":""}${fmtV(v)}</b>
         </div>
-        <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">${meio}${dup}</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap" onclick="event.stopPropagation()">${meio}${dup}</div>
       </div>
     </div>`;
   }).join("");
@@ -2811,42 +2982,103 @@ function propostaHTML(){
       <div style="font-size:10.5px;color:#5b7a6d;margin-top:3px">${propTotais||propCreditos?"= suas <b>compras</b> desta fatura":"confira com o total da fatura antes de incluir 👇"}</div>
       ${(function(){
         if(!propTotais) return propCreditos?`<div style="font-size:10.5px;color:#5b7a6d;margin-top:6px;padding-top:6px;border-top:1px dashed #BFE0D2">↷ deixei de fora <b>${propCreditos.n}</b> linha(s) de pagamento/crédito/estorno — elas não são despesa sua.</div>`:"";
-        // CONFERÊNCIA contra os totais que a própria fatura declara
-        const decl=propTotais.somaCartoes||0;
+        // CONFERÊNCIA contra os totais que a própria fatura declara.
+        // Bancos como a CAIXA declaram "Total final (cartão X)" (somaCartoes).
+        // O BB não tem isso — só o "Total da Fatura". Nesse caso, se a soma do que
+        // li bate com o total impresso (sem créditos no meio), também conferimos.
+        let decl=propTotais.somaCartoes||0;
+        let baseLabel="a fatura declara em compras";
+        if(!decl && propTotais.totalFatura && Math.abs(somaTudo-propTotais.totalFatura)<0.05){
+          decl=propTotais.totalFatura; baseLabel="total de compras da fatura";
+        }
         const dif=decl?somaTudo-decl:0;
         const ok=decl&&Math.abs(dif)<0.05;
+        // Valor dos créditos que reduzem ESTA fatura (IOF estornado + ajustes).
+        // Derivamos de compras − total impresso: é a conta que a fatura fecha.
+        // NÃO usamos a soma bruta de créditos lidos, pois ela inclui o pagamento
+        // da fatura anterior ("OBRIGADO PELO PAGAMENTO"), que não abate compras.
+        const _base = decl||somaTudo;
+        const credVal = propTotais.totalFatura ? Math.max(0, _base-propTotais.totalFatura) : 0;
+        const credN = propCreditos?propCreditos.n:0;
+        // a conta fecha? compras − créditos ≈ total impresso
+        const fecha = propTotais.totalFatura ? Math.abs(_base-credVal-propTotais.totalFatura)<0.05 : false;
         return `<div style="margin-top:7px;padding-top:7px;border-top:1px dashed #BFE0D2;font-size:10.5px;color:#5b7a6d;line-height:1.6">
-          ${decl?`<div style="display:flex;justify-content:space-between"><span>a fatura declara em compras</span><b>${fmtV(decl)}</b></div>
+          ${decl?`<div style="display:flex;justify-content:space-between"><span>${baseLabel}</span><b>${fmtV(decl)}</b></div>
             <div style="display:flex;justify-content:space-between;color:${ok?"#0E7A55":"#B4536B"}"><span>${ok?"✓ confere com o que li":"⚠️ diferença na leitura"}</span><b>${ok?"":(dif>0?"+":"")+fmtV(dif)}</b></div>`:""}
-          ${propTotais.totalFatura?`<div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:4px;border-top:1px dotted #CFE6DA"><span>total impresso na fatura</span><b>${fmtV(propTotais.totalFatura)}</b></div>
-            <div style="font-size:10px;margin-top:3px">Esse total já <b>desconta pagamentos e créditos</b> (${propCreditos?propCreditos.n:0} linha(s) que deixei de fora). Por isso ele é menor que a soma das compras — e é a soma das compras que entra na sua projeção.</div>`:""}
+          ${credVal>0.005?`<div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:4px;border-top:1px dotted #CFE6DA"><span>(−) créditos e estornos da fatura</span><b style="color:#0E7A55">−${fmtV(credVal)}</b></div>
+            <div style="font-size:10px;margin-top:2px;color:#0E7A55">IOF estornado e ajustes — <b>dinheiro que voltou pra você</b>, não é gasto. Fica de fora da projeção.</div>`:""}
+          ${propTotais.totalFatura&&credVal>0.005?`<div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:4px;border-top:1px dotted #CFE6DA"><span>total impresso na fatura</span><b>${fmtV(propTotais.totalFatura)}</b></div>
+            <div style="font-size:10px;margin-top:3px">${fecha?`✓ a conta fecha: <b>compras − créditos = total impresso</b>. Não sumiu nada. Na projeção entra a <b>soma das compras</b> (${fmtV(_base)}), seu gasto real do mês.`:`Esse total já <b>desconta pagamentos e créditos</b>. Por isso é menor que a soma das compras — e é a soma das compras que entra na sua projeção.`}</div>`:""}
         </div>`;
       })()}
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 0">
       <span style="font-size:11px;color:#8895a5">toque para desmarcar ou trocar o tipo</span>
-      <button onclick="_g.propTodos(${todos?0:1})" style="background:none;border:1px solid #cfd6dd;color:#41506b;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px">${todos?"desmarcar todos":"marcar todos"}</button>
+      <button id="propBtnTodos" onclick="_g.propTodos(${todos?0:1})" style="background:none;border:1px solid #cfd6dd;color:#41506b;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px">${todos?"desmarcar todos":"marcar todos"}</button>
     </div>
     <div style="max-height:290px;overflow-y:auto;margin-top:2px;-webkit-overflow-scrolling:touch">${linhas}</div>
     ${avisoDup}
     <div style="border-top:2px solid #e6ebf0;margin-top:10px;padding-top:9px">
-      <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#41506b">selecionados</span><b>${sel.length}/${n} · ${fmtV(somaSel)}</b></div>
-      ${somaRec>0?`<div style="display:flex;justify-content:space-between;font-size:11.5px;color:#8895a5;margin-top:3px"><span>despesas ${fmtV(somaDesp)}</span><span style="color:var(--emerald)">receitas +${fmtV(somaRec)}</span></div>`:""}
-      ${nPar?`<div style="font-size:11px;color:#8895a5;margin-top:3px">${nPar} ${nPar===1?"parcela vai se repetir":"parcelas vão se repetir"} nos próximos meses</div>`:""}
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#41506b">selecionados</span><b id="propContador">${sel.length}/${n} · ${fmtV(somaSel)}</b></div>
+      <div id="propSub" style="display:flex;justify-content:space-between;font-size:11.5px;color:#8895a5;margin-top:3px">${somaRec>0?`<span>despesas ${fmtV(somaDesp)}</span><span style="color:var(--emerald)">receitas +${fmtV(somaRec)}</span>`:""}</div>
+      <div id="propPar" style="font-size:11px;color:#8895a5;margin-top:3px">${nPar?`${nPar} ${nPar===1?"parcela vai se repetir":"parcelas vão se repetir"} nos próximos meses`:""}</div>
     </div>
     <div style="display:flex;gap:8px;margin-top:10px">
-      <button onclick="_g.chatIncluirProposta()" ${sel.length?"":"disabled"} style="flex:1;background:${sel.length?"var(--emerald)":"#c9d3da"};border:none;color:#fff;font-weight:700;font-size:13px;padding:10px;border-radius:9px">incluir ${sel.length} ${sel.length===1?"item":"itens"}</button>
+      <button id="propBtnIncluir" onclick="_g.chatIncluirProposta()" ${sel.length?"":"disabled"} style="flex:1;background:${sel.length?"var(--emerald)":"#c9d3da"};border:none;color:#fff;font-weight:700;font-size:13px;padding:10px;border-radius:9px">incluir ${sel.length} ${sel.length===1?"item":"itens"}</button>
       <button onclick="_g.chatDescartarProposta()" style="background:none;border:1px solid #cfd6dd;color:#8895a5;font-weight:700;font-size:13px;padding:10px 12px;border-radius:9px">descartar</button>
     </div>`;
 }
+// Atualização LEVE do rodapé da proposta (contador + botão incluir), sem recriar
+// os checkboxes. Recriar o #propBox inteiro a cada toque quebrava o registro de
+// cliques no iOS Safari — era por isso que marcar os itens "já lançados" não
+// surtia efeito e o botão continuava com a contagem antiga.
+function propAtualizarRodape(){
+  const its=chatProposta||[]; const n=its.length;
+  const sel=its.filter(x=>x._sel);
+  const somaSel=sel.reduce((a,x)=>a+valorItemProp(x),0);
+  const somaDesp=sel.filter(x=>!x._receita).reduce((a,x)=>a+valorItemProp(x),0);
+  const somaRec=sel.filter(x=>x._receita).reduce((a,x)=>a+valorItemProp(x),0);
+  const nPar=sel.filter(x=>!x._receita&&x.natureza==="parcela").length;
+  const contador=document.getElementById("propContador");
+  if(contador) contador.innerHTML=`${sel.length}/${n} · ${fmtV(somaSel)}`;
+  const sub=document.getElementById("propSub");
+  if(sub) sub.innerHTML = somaRec>0?`<span>despesas ${fmtV(somaDesp)}</span><span style="color:var(--emerald)">receitas +${fmtV(somaRec)}</span>`:"";
+  const par=document.getElementById("propPar");
+  if(par) par.textContent = nPar?`${nPar} ${nPar===1?"parcela vai se repetir":"parcelas vão se repetir"} nos próximos meses`:"";
+  const btn=document.getElementById("propBtnIncluir");
+  if(btn){
+    btn.textContent=`incluir ${sel.length} ${sel.length===1?"item":"itens"}`;
+    btn.disabled=!sel.length;
+    btn.style.background=sel.length?"var(--emerald)":"#c9d3da";
+  }
+  const btnTodos=document.getElementById("propBtnTodos");
+  if(btnTodos){ const todos=its.every(x=>x._sel); btnTodos.textContent=todos?"desmarcar todos":"marcar todos"; btnTodos.setAttribute("onclick",`_g.propTodos(${todos?0:1})`); }
+  // mantém a mensagem sincronizada para quando o chat re-renderizar
+  if(propMsg){ const box=document.getElementById("propBox"); if(box) propMsg.html=`<div id="propBox">${box.innerHTML}</div>`; }
+}
+// refresh COMPLETO só quando muda a estrutura (tipo de despesa, nº de parcelas)
 function propRefresh(){
   const box=document.getElementById("propBox");
   const html=propostaHTML();
   if(box) box.innerHTML=html;
   if(propMsg) propMsg.html=`<div id="propBox">${html}</div>`;   // mantém ao re-renderizar o chat
 }
-G.propSel=(i,v)=>{ if(chatProposta&&chatProposta[i]){ chatProposta[i]._sel=!!v; propRefresh(); } };
-G.propTodos=(v)=>{ (chatProposta||[]).forEach(x=>x._sel=!!v); propRefresh(); };
+G.propSel=(i,v)=>{
+  if(chatProposta&&chatProposta[i]){
+    chatProposta[i]._sel=!!v;
+    // atualiza só a opacidade da linha + rodapé — NÃO recria os checkboxes
+    const row=document.getElementById("propRow"+i); if(row) row.style.opacity=v?"":".45";
+    const cb=document.getElementById("propCb"+i); if(cb) cb.checked=!!v;
+    propAtualizarRodape();
+  }
+};
+G.propTodos=(v)=>{
+  (chatProposta||[]).forEach((x,i)=>{ x._sel=!!v;
+    const row=document.getElementById("propRow"+i); if(row) row.style.opacity=v?"":".45";
+    const cb=document.getElementById("propCb"+i); if(cb) cb.checked=!!v;
+  });
+  propAtualizarRodape();
+};
 G.propNat=(i,nat)=>{
   const it=chatProposta&&chatProposta[i]; if(!it) return;
   it.natureza=nat;
