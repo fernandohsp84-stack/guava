@@ -178,6 +178,7 @@ let cfg={firebase:{
   measurementId:"G-90GP5LNT3X"
 },funcaoUrl:""};
 let tab="inicio", modoAdd="texto", filtroDesp="todos";
+let buscaDesp="", buscaRec="";   // termos de busca nas abas Despesas e Receitas
 let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null, mesDetalhe=null, incEdit=null;
 let storyAtivo=false, storyStep=0, storyTimer=null;
 let chatAberto=false, chatMsgs=[], chatEstado="idle";
@@ -3201,14 +3202,68 @@ function linhasParaItens(rows){
   }
   return itens;
 }
+// Divide UMA linha de CSV respeitando aspas (RFC 4180): "Bar, Restaurante" fica
+// num campo só, e "" vira aspas literal.
+function splitCSVLinha(linha, sep){
+  const out=[]; let cur=""; let dentro=false;
+  for(let i=0;i<linha.length;i++){
+    const ch=linha[i];
+    if(ch==='"'){ if(dentro && linha[i+1]==='"'){ cur+='"'; i++; } else dentro=!dentro; }
+    else if(ch===sep && !dentro){ out.push(cur); cur=""; }
+    else cur+=ch;
+  }
+  out.push(cur);
+  return out.map(s=>s.trim());
+}
+// Interpreta um CSV de extrato/fatura reconhecendo o CABEÇALHO. Cobre os formatos
+// do Nubank (fatura do cartão: date,title,amount — compras positivas, pagamentos
+// negativos) e do extrato NuConta (Data,Valor,Descrição — despesas negativas,
+// entradas positivas), além de exports genéricos em pt-BR. Cai no heurístico
+// antigo (linhasParaItens) se não achar um cabeçalho reconhecível.
+function csvParaItens(txt){
+  const linhasBrutas=txt.split(/\r?\n/).filter(l=>l.trim()!=="");
+  if(!linhasBrutas.length) return [];
+  const sep=(txt.match(/;/g)||[]).length>(txt.match(/,/g)||[]).length?";":",";
+  const head=splitCSVLinha(linhasBrutas[0],sep).map(h=>chaveNome(h));
+  const acha=(...alts)=>head.findIndex(h=>alts.some(a=>h===a||h.includes(a)));
+  const iData=acha("date","data","data da compra","data do lancamento");
+  const iDesc=acha("title","descricao","description","estabelecimento","lancamento","historico","titulo");
+  const iValor=acha("amount","valor","value","quantia","montante");
+  // sem cabeçalho reconhecível → usa o detector heurístico coluna-a-coluna
+  if(iValor<0 || iDesc<0){
+    const rows=linhasBrutas.map(l=>splitCSVLinha(l,sep));
+    return posProcessarFatura(linhasParaItens(rows));
+  }
+  // Convenção de sinal: descobrimos olhando os dados. Se a MAIORIA dos valores é
+  // negativa, é extrato de conta (despesa negativa) → gasto = valor<0. Caso
+  // contrário é fatura de cartão (compra positiva) → gasto = valor>0.
+  const corpo=linhasBrutas.slice(1).map(l=>splitCSVLinha(l,sep));
+  let neg=0, pos=0;
+  for(const r of corpo){ const v=valorCelula(r[iValor]); if(v==null) continue; if(v<0) neg++; else if(v>0) pos++; }
+  const despesaEhNegativa = neg>pos;   // extrato de conta
+  const itens=[];
+  for(const r of corpo){
+    if(!r || !r.length) continue;
+    const nome=(r[iDesc]||"").trim();
+    const v=valorCelula(r[iValor]);
+    if(v==null || !nome) continue;
+    const ehGasto = despesaEhNegativa ? (v<0) : (v>0);
+    if(!ehGasto) continue;                          // pula pagamentos/estornos/entradas
+    const valor=Math.abs(v);
+    if(!(valor>0) || valor>=1000000) continue;
+    const low=nome.toLowerCase();
+    if(/^(total|subtotal|saldo|fatura anterior|pagamento receb|pagamento de fatura|pagamento em|transfer[êe]ncia recebida|estorno)\b/.test(low)) continue;
+    const dataCel=iData>=0?(r[iData]||"").trim():null;
+    itens.push({nome:nome.slice(0,80), valor, data:(dataCel && ehDataCelula(dataCel))?dataCel:null, origem:"planilha"});
+  }
+  return posProcessarFatura(itens);
+}
 async function lerPlanilha(file){
   if(!file.size) throw new Error("arquivo vazio (0 bytes) — exporte novamente do app do banco");
   const nome=(file.name||"").toLowerCase();
   if(nome.endsWith(".csv") || file.type==="text/csv"){
     const txt=await file.text();
-    const sep=(txt.match(/;/g)||[]).length>=(txt.match(/,/g)||[]).length?";":",";
-    const rows=txt.split(/\r?\n/).map(l=>l.split(sep));
-    return posProcessarFatura(linhasParaItens(rows));
+    return csvParaItens(txt);
   }
   const X=await carregarXLSX();
   const buf=await file.arrayBuffer();
@@ -4289,7 +4344,10 @@ G.fecharIncentivo=()=>{ tab="inicio"; incEdit=null; render(); window.scrollTo(0,
 function viewDespesas(){
   garanteMesRef();
   const grupos=["ordinaria","estimada","eventual","parcela"];
-  const vis=filtroDesp==="todos"?state.itens:state.itens.filter(i=>i.natureza===filtroDesp);
+  let vis=filtroDesp==="todos"?state.itens:state.itens.filter(i=>i.natureza===filtroDesp);
+  // busca por nome (ignora acentos e maiúsculas)
+  const termoD=chaveNome(buscaDesp);
+  if(termoD) vis=vis.filter(i=>chaveNome(i.nome).includes(termoD));
   const pills=["todos",...grupos].map(g=>{
     const on=filtroDesp===g, cor=NAT_COR[g]||"var(--blue)";
     const txt=g==="todos"?"Todas":NAT_LABEL[g].split(" ")[0];
@@ -4310,16 +4368,38 @@ function viewDespesas(){
       <button onclick="_g.fecharMes()" style="background:var(--green);border:none;color:#fff;font-size:12px;font-weight:700;padding:8px 14px;border-radius:9px">📅 Fechar mês</button>
     </div>
   </div>`;
-  const cards=vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">Nenhuma despesa aqui. Use ➕ Adicionar.</div>`;
+  const cards=vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">${termoD?`Nada encontrado para “${h(buscaDesp)}”.`:"Nenhuma despesa aqui. Use ➕ Adicionar."}</div>`;
   const totalItens=(state.itens||[]).length;
   const btnReset=totalItens?`<button onclick="_g.resetDespesas(false)" title="Excluir todas as despesas e recomeçar" style="background:#fff;border:1.5px solid #E3C2CC;color:#B4536B;font-size:12px;font-weight:700;padding:7px 12px;border-radius:9px;white-space:nowrap">↺ Zerar despesas</button>`:"";
+  const btnAdd=`<button onclick="_g.setTab('add')" title="Adicionar despesa ou receita" style="background:var(--emerald);border:none;color:#fff;font-size:13px;font-weight:800;padding:7px 13px;border-radius:9px;white-space:nowrap;display:flex;align-items:center;gap:5px">＋ Adicionar</button>`;
+  // caixa de busca (aparece quando há itens): filtra por nome em tempo real
+  const busca=totalItens?`<div style="position:relative;margin-bottom:12px">
+      <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--mute)">🔍</span>
+      <input id="buscaDesp" type="search" value="${h(buscaDesp)}" oninput="_g.buscarDesp(this.value)" placeholder="Buscar despesa pelo nome…" style="width:100%;box-sizing:border-box;padding:10px 34px 10px 34px;border:1.5px solid var(--line);border-radius:11px;font-size:13.5px;background:#fff;color:var(--ink)">
+      <button id="buscaDespClear" onclick="document.getElementById('buscaDesp').value='';_g.buscarDesp('')" style="display:${buscaDesp?"block":"none"};position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mute);font-size:16px;padding:4px">×</button>
+    </div>`:"";
   return `<div style="padding-top:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 style="margin:0">Despesas</h2>${btnReset}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0">Despesas</h2>
+      <div style="display:flex;gap:8px">${btnAdd}${btnReset}</div>
     </div>
     ${cab}
-    <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px">${pills}</div>${cards}</div>`;
+    ${busca}
+    <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px">${pills}</div>
+    <div id="despCards">${cards}</div></div>`;
 }
+// busca de despesas: atualização leve (não recria a tela toda a cada tecla, para
+// não perder o foco do teclado no iOS Safari)
+G.buscarDesp=(v)=>{
+  buscaDesp=v||"";
+  let vis=filtroDesp==="todos"?state.itens:state.itens.filter(i=>i.natureza===filtroDesp);
+  const termo=chaveNome(buscaDesp);
+  if(termo) vis=vis.filter(i=>chaveNome(i.nome).includes(termo));
+  const box=document.getElementById("despCards");
+  if(box) box.innerHTML = vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">${termo?`Nada encontrado para “${h(buscaDesp)}”.`:"Nenhuma despesa aqui. Use ➕ Adicionar."}</div>`;
+  const clr=document.getElementById("buscaDespClear");
+  if(clr) clr.style.display = buscaDesp?"block":"none";
+};
 function itemCard(it){
   const v=it.natureza==="estimada"?provavel(it):(+it.valor||0);
   const pago=estaPago(it.id);
@@ -4645,12 +4725,36 @@ function cardReceitaExtra(){
         : `<select id="recMes" class="inp" style="flex:1;background:#fff">${meses}</select>`}
     </div>
     <button class="btnP" style="width:100%;margin-top:12px" onclick="_g.addReceita()">adicionar receita</button>
-    ${(state.receitas||[]).length?`<div style="margin-top:12px">${state.receitas.map(r=>{
-        const quando = r.recorrente ? "todo mês" : (()=>{ const d=new Date(now.getFullYear(),now.getMonth()+(+r.mesIdx||0),1); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; })();
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:13px;color:var(--ink)">${r.recorrente?'🔁 ':''}${r.nome} <span style="color:var(--nu);font-size:11px">${quando}</span></span><span style="display:flex;align-items:center;gap:10px"><b style="color:var(--emerald)">+${fmtV(r.valor)}</b><button onclick="_g.delReceita('${r.id}')" style="background:none;border:none;color:var(--gpink);font-size:12px;font-weight:700">excluir</button></span></div>`;
-      }).join("")}</div>`:""}
+    ${(state.receitas||[]).length?`<div style="margin-top:14px">
+      <div style="position:relative;margin-bottom:8px">
+        <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--mute)">🔍</span>
+        <input id="buscaRec" type="search" value="${h(buscaRec)}" oninput="_g.buscarRec(this.value)" placeholder="Buscar receita pelo nome…" style="width:100%;box-sizing:border-box;padding:9px 34px;border:1.5px solid var(--line);border-radius:11px;font-size:13px;background:#fff;color:var(--ink)">
+        <button id="buscaRecClear" onclick="document.getElementById('buscaRec').value='';_g.buscarRec('')" style="display:${buscaRec?"block":"none"};position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mute);font-size:16px;padding:4px">×</button>
+      </div>
+      <div id="recLista">${listaReceitasHTML()}</div>
+    </div>`:""}
   </div>`;
 }
+// HTML da lista de receitas, respeitando o filtro de busca (usado no render e na
+// atualização leve ao digitar — assim o teclado não perde o foco no iOS).
+function listaReceitasHTML(){
+  const now=new Date();
+  const termo=chaveNome(buscaRec);
+  let rs=(state.receitas||[]);
+  if(termo) rs=rs.filter(r=>chaveNome(r.nome).includes(termo));
+  if(!rs.length) return `<div style="text-align:center;color:var(--mute);font-size:12.5px;padding:16px">${termo?`Nada encontrado para “${h(buscaRec)}”.`:"Nenhuma receita cadastrada."}</div>`;
+  return rs.map(r=>{
+    const quando = r.recorrente ? "todo mês" : (()=>{ const d=new Date(now.getFullYear(),now.getMonth()+(+r.mesIdx||0),1); return `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`; })();
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:13px;color:var(--ink)">${r.recorrente?'🔁 ':''}${h(r.nome)} <span style="color:var(--nu);font-size:11px">${quando}</span></span><span style="display:flex;align-items:center;gap:10px"><b style="color:var(--emerald)">+${fmtV(r.valor)}</b><button onclick="_g.delReceita('${r.id}')" style="background:none;border:none;color:var(--gpink);font-size:12px;font-weight:700">excluir</button></span></div>`;
+  }).join("");
+}
+G.buscarRec=(v)=>{
+  buscaRec=v||"";
+  const box=document.getElementById("recLista");
+  if(box) box.innerHTML=listaReceitasHTML();
+  const clr=document.getElementById("buscaRecClear");
+  if(clr) clr.style.display = buscaRec?"block":"none";
+};
 G.setRecRecorrente=(v)=>{ recRecorrente=!!v; render(); };
 G.addReceita=()=>{
   const nome=document.getElementById("recNome")?.value?.trim()||"Receita extra";
