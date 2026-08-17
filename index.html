@@ -179,6 +179,7 @@ let cfg={firebase:{
 },funcaoUrl:""};
 let tab="inicio", modoAdd="texto", filtroDesp="todos";
 let buscaDesp="", buscaRec="";   // termos de busca nas abas Despesas e Receitas
+let ordemDesp="natural";          // ordenação da aba Despesas: natural|valor_desc|valor_asc|nome|data_desc
 let ouvindo=false, rec=null, resultadoTmp=null, editandoId=null, mesDetalhe=null, incEdit=null;
 let storyAtivo=false, storyStep=0, storyTimer=null;
 let chatAberto=false, chatMsgs=[], chatEstado="idle";
@@ -480,7 +481,7 @@ function gastoDoMes(i){
     if(it.natureza==="ordinaria") fixo+=+it.valor||0;
     else if(it.natureza==="estimada") estimado+=provavel(it);
     else if(it.natureza==="eventual"){ if((+it.mesIdx||0)===i) eventual+=+it.valor||0; }
-    else if(it.natureza==="parcela"){ if(i<(+it.restam||0)) parcela+=+it.valor||0; }
+    else if(it.natureza==="parcela"){ const ini=+it.inicioIdx||0; if(i>=ini && i<ini+(+it.restam||0)) parcela+=+it.valor||0; }
   }
   return {fixo,estimado,eventual,parcela,total:fixo+estimado+eventual+parcela};
 }
@@ -492,8 +493,8 @@ function itensDoMes(i){
     if(it.natureza==="ordinaria"){ v=+it.valor||0; ativo=true; }
     else if(it.natureza==="estimada"){ v=provavel(it); ativo=true; }
     else if(it.natureza==="eventual"){ if((+it.mesIdx||0)===i){ v=+it.valor||0; ativo=true; } }
-    else if(it.natureza==="parcela"){ if(i<(+it.restam||0)){ v=+it.valor||0; ativo=true; } }
-    if(ativo) out.push({...it, _v:v, _totalParc: it.natureza==="parcela"?Math.max(Math.round((+it.total)/(+it.valor||1)),+it.restam||1):null, _parcelaNum: it.natureza==="parcela"?(Math.max(Math.round((+it.total)/(+it.valor||1)),+it.restam||1)-(+it.restam||0)+i+1):null});
+    else if(it.natureza==="parcela"){ const ini=+it.inicioIdx||0; if(i>=ini && i<ini+(+it.restam||0)){ v=+it.valor||0; ativo=true; } }
+    if(ativo) out.push({...it, _v:v, _totalParc: it.natureza==="parcela"?Math.max(Math.round((+it.total)/(+it.valor||1)),+it.restam||1):null, _parcelaNum: it.natureza==="parcela"?(Math.max(Math.round((+it.total)/(+it.valor||1)),+it.restam||1)-(+it.restam||0)+(i-(+it.inicioIdx||0))+1):null});
   }
   return out.sort((a,b)=>b._v-a._v);
 }
@@ -907,11 +908,15 @@ function normalizarLancamento(it){
   if(o.natureza==="parcela"){
     o.restam=Math.max(1,Math.min(120,parseInt(o.restam,10)||1));
     o.total=arred(o.total||o.valor*o.restam);
+    // inicioIdx = em quantos meses a PARCELA começa a pesar (0 = mês atual).
+    // Compra no cartão hoje só cai na PRÓXIMA fatura → inicioIdx=1 por padrão
+    // quando a origem é fatura/cartão. Manual assume 0 salvo escolha do usuário.
+    o.inicioIdx=Math.max(0,Math.min(60,parseInt(o.inicioIdx,10)||0));
     delete o.mesIdx;
   } else if(o.natureza==="eventual"){
     o.mesIdx=Math.max(0,Math.min(60,parseInt(o.mesIdx,10)||0));
-    delete o.restam; delete o.total;
-  } else { delete o.restam; delete o.total; delete o.mesIdx; }
+    delete o.restam; delete o.total; delete o.inicioIdx;
+  } else { delete o.restam; delete o.total; delete o.mesIdx; delete o.inicioIdx; }
   // data da transação (quando existir) e competência derivada dela
   o.data=canonData(o.data);
   if(o.data && o.natureza==="eventual"){
@@ -2896,6 +2901,8 @@ function lancamentosDoTexto(q){
 // sanitização de texto do usuário antes de inserir em HTML (previne injeção)
 function h(x){ return String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 let chatProposta=null;
+let propInicioIdx=1;  // em quantos meses os lançamentos da proposta começam a pesar
+                      // (fatura de cartão hoje → cai na PRÓXIMA fatura, por isso 1)
 let ultimosLancamentos=[]; // resumo do que foi incluído nesta conversa (p/ "você incluiu?")
 // Intenção pendente: quando o GuavAI FAZ uma pergunta de ação ("quer que eu limpe
 // essas receitas?"), guardamos aqui o que ele vai fazer se o usuário confirmar.
@@ -3017,6 +3024,13 @@ function propostaHTML(){
       <span style="font-size:11px;color:#8895a5">toque para desmarcar ou trocar o tipo</span>
       <button id="propBtnTodos" onclick="_g.propTodos(${todos?0:1})" style="background:none;border:1px solid #cfd6dd;color:#41506b;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px">${todos?"desmarcar todos":"marcar todos"}</button>
     </div>
+    ${sel.some(x=>!x._receita)?`<div style="background:#F0F6FF;border:1px solid #CFE0F5;border-radius:11px;padding:9px 11px;margin:8px 0 4px">
+      <div style="font-size:11.5px;color:#2C5AA0;font-weight:700;margin-bottom:5px">📅 A partir de que mês essas compras pesam?</div>
+      <div style="font-size:10.5px;color:#5b6b82;margin-bottom:7px">Compras no cartão entram na <b>próxima fatura</b>. Confirme o mês em que elas começam a contar no orçamento.</div>
+      <select id="propInicio" onchange="_g.propInicio(this.value)" style="width:100%;padding:8px 10px;border:1.5px solid #CFE0F5;border-radius:9px;font-size:12.5px;background:#fff;color:#2C5AA0;font-weight:700;-webkit-appearance:none;appearance:none">
+        ${[0,1,2,3].map(k=>`<option value="${k}" ${propInicioIdx===k?"selected":""}>${k===0?"Este mês ("+mesLabelIdx(0)+")":k===1?"Próxima fatura ("+mesLabelIdx(1)+")":mesLabelIdx(k)}</option>`).join("")}
+      </select>
+    </div>`:""}
     <div style="max-height:290px;overflow-y:auto;margin-top:2px;-webkit-overflow-scrolling:touch">${linhas}</div>
     ${avisoDup}
     <div style="border-top:2px solid #e6ebf0;margin-top:10px;padding-top:9px">
@@ -3064,6 +3078,7 @@ function propRefresh(){
   if(box) box.innerHTML=html;
   if(propMsg) propMsg.html=`<div id="propBox">${html}</div>`;   // mantém ao re-renderizar o chat
 }
+G.propInicio=(v)=>{ propInicioIdx=Math.max(0,Math.min(60,parseInt(v,10)||0)); };
 G.propSel=(i,v)=>{
   if(chatProposta&&chatProposta[i]){
     chatProposta[i]._sel=!!v;
@@ -3097,6 +3112,9 @@ G.propRestam=(i,v)=>{
 function propostaChat(itens, creditos, totais){
   propCreditos = creditos && creditos.soma>0 ? creditos : null;
   propTotais = totais && (totais.somaCartoes>0 || totais.totalFatura) ? totais : null;
+  // Competência: compras desta fatura só pesam na PRÓXIMA fatura (mês seguinte).
+  // Começamos em 1 (próximo mês) e deixamos o usuário confirmar/ajustar.
+  propInicioIdx=1;
   // aceita despesas (com natureza) e receitas (com _receita); marca duplicados
   // e já vem tudo selecionado, exceto o que parece repetido
   chatProposta = itens.map(it=>{ const o=it._receita?{...it}:normaliza(it); delete o._src; o._dup=ehDuplicado(o); o._sel=!o._dup; return o; });
@@ -3119,9 +3137,17 @@ G.chatIncluirProposta=(forcar)=>{
       ultimosLancamentos.push(`${h(it.nome)} — +${fmtV(it.valor)} (receita ${it.recorrente?'todo mês':mesLabelIdx(it.mesIdx)})`);
     } else {
       const nome=it.nome, nat=it.natureza||"eventual";
-      const v = nat==="estimada"?provavel(it):(+it.valor||0);
-      const det = nat==="parcela" ? `parcela · ${(+it.restam||1)}x` : (NAT_LABEL[nat]||"despesa").split(" ")[0].toLowerCase();
-      lancar(it); nd++;
+      // aplica a competência escolhida no seletor (📅). Parcela → inicioIdx;
+      // eventual → mesIdx (a menos que já tenha vindo com mês específico da data).
+      const itComInicio={...it};
+      if(nat==="parcela") itComInicio.inicioIdx=propInicioIdx;
+      else if(nat==="eventual" && !(it.data)) itComInicio.mesIdx=propInicioIdx;
+      const v = nat==="estimada"?provavel(itComInicio):(+itComInicio.valor||0);
+      const quando = nat==="parcela"
+        ? (propInicioIdx>0?` · começa em ${mesLabelIdx(propInicioIdx)}`:"")
+        : (nat==="eventual" && (itComInicio.mesIdx>0)?` · ${mesLabelIdx(itComInicio.mesIdx)}`:"");
+      const det = nat==="parcela" ? `parcela · ${(+it.restam||1)}x${quando}` : (NAT_LABEL[nat]||"despesa").split(" ")[0].toLowerCase()+quando;
+      lancar(itComInicio); nd++;
       linhas.push(`🧾 <b>${h(nome)}</b> ${fmtV(v)} <span style="color:#8895a5">→ Despesas · ${det}</span>`);
       ultimosLancamentos.push(`${h(nome)} — ${fmtV(v)} (${det})`);
     }
@@ -4341,13 +4367,29 @@ G.excluirIncentivo=id=>{ if(!confirm("Excluir este evento?")) return; state.ince
 G.fecharIncentivo=()=>{ tab="inicio"; incEdit=null; render(); window.scrollTo(0,0); };
 
 // ---------- Despesas ----------
+// Aplica, em ordem, o FILTRO (pill), a BUSCA (nome) e a ORDENAÇÃO escolhida.
+// Usado tanto no render completo quanto na atualização leve (busca/ordenar),
+// para não duplicar a lógica e nunca divergir entre os dois caminhos.
+function despesasVisiveis(){
+  let vis=filtroDesp==="todos"?(state.itens||[]).slice():(state.itens||[]).filter(i=>i.natureza===filtroDesp);
+  const termo=chaveNome(buscaDesp);
+  if(termo) vis=vis.filter(i=>chaveNome(i.nome).includes(termo));
+  const valOf=it=>it.natureza==="estimada"?provavel(it):(+it.valor||0);
+  if(ordemDesp==="valor_desc") vis.sort((a,b)=>valOf(b)-valOf(a));
+  else if(ordemDesp==="valor_asc") vis.sort((a,b)=>valOf(a)-valOf(b));
+  else if(ordemDesp==="nome") vis.sort((a,b)=>chaveNome(a.nome).localeCompare(chaveNome(b.nome)));
+  else if(ordemDesp==="data_desc") vis.sort((a,b)=>String(b.data||"").localeCompare(String(a.data||"")));
+  // "natural" mantém a ordem de inserção (não ordena)
+  return vis;
+}
+function despCardsHTML(){
+  const vis=despesasVisiveis();
+  const termo=chaveNome(buscaDesp);
+  return vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">${termo?`Nada encontrado para “${h(buscaDesp)}”.`:"Nenhuma despesa aqui. Use ➕ Adicionar."}</div>`;
+}
 function viewDespesas(){
   garanteMesRef();
   const grupos=["ordinaria","estimada","eventual","parcela"];
-  let vis=filtroDesp==="todos"?state.itens:state.itens.filter(i=>i.natureza===filtroDesp);
-  // busca por nome (ignora acentos e maiúsculas)
-  const termoD=chaveNome(buscaDesp);
-  if(termoD) vis=vis.filter(i=>chaveNome(i.nome).includes(termoD));
   const pills=["todos",...grupos].map(g=>{
     const on=filtroDesp===g, cor=NAT_COR[g]||"var(--blue)";
     const txt=g==="todos"?"Todas":NAT_LABEL[g].split(" ")[0];
@@ -4368,45 +4410,59 @@ function viewDespesas(){
       <button onclick="_g.fecharMes()" style="background:var(--green);border:none;color:#fff;font-size:12px;font-weight:700;padding:8px 14px;border-radius:9px">📅 Fechar mês</button>
     </div>
   </div>`;
-  const cards=vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">${termoD?`Nada encontrado para “${h(buscaDesp)}”.`:"Nenhuma despesa aqui. Use ➕ Adicionar."}</div>`;
+  const cards=despCardsHTML();
   const totalItens=(state.itens||[]).length;
   const btnReset=totalItens?`<button onclick="_g.resetDespesas(false)" title="Excluir todas as despesas e recomeçar" style="background:#fff;border:1.5px solid #E3C2CC;color:#B4536B;font-size:12px;font-weight:700;padding:7px 12px;border-radius:9px;white-space:nowrap">↺ Zerar despesas</button>`:"";
   const btnAdd=`<button onclick="_g.setTab('add')" title="Adicionar despesa ou receita" style="background:var(--emerald);border:none;color:#fff;font-size:13px;font-weight:800;padding:7px 13px;border-radius:9px;white-space:nowrap;display:flex;align-items:center;gap:5px">＋ Adicionar</button>`;
+  const btnExp=totalItens||(state.receitas||[]).length?`<button onclick="_g.abrirExportar()" title="Exportar despesas e receitas (CSV ou PDF)" style="background:#fff;border:1.5px solid #BFD9CB;color:#1F7A54;font-size:12px;font-weight:700;padding:7px 12px;border-radius:9px;white-space:nowrap">⬇︎ Exportar</button>`:"";
   // caixa de busca (aparece quando há itens): filtra por nome em tempo real
   const busca=totalItens?`<div style="position:relative;margin-bottom:12px">
       <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--mute)">🔍</span>
       <input id="buscaDesp" type="search" value="${h(buscaDesp)}" oninput="_g.buscarDesp(this.value)" placeholder="Buscar despesa pelo nome…" style="width:100%;box-sizing:border-box;padding:10px 34px 10px 34px;border:1.5px solid var(--line);border-radius:11px;font-size:13.5px;background:#fff;color:var(--ink)">
       <button id="buscaDespClear" onclick="document.getElementById('buscaDesp').value='';_g.buscarDesp('')" style="display:${buscaDesp?"block":"none"};position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mute);font-size:16px;padding:4px">×</button>
     </div>`:"";
+  // ordenação (aparece quando há itens): reordena a lista sem recriar a tela toda
+  const ordOpts=[["natural","Ordem de inclusão"],["valor_desc","Maior valor"],["valor_asc","Menor valor"],["nome","Nome (A–Z)"],["data_desc","Data (mais recente)"]];
+  const ordena=totalItens?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <span style="font-size:12px;color:var(--mute);white-space:nowrap">↕ Ordenar</span>
+      <select id="ordemDesp" onchange="_g.ordenarDesp(this.value)" style="flex:1;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;font-size:13px;background:#fff;color:var(--ink);-webkit-appearance:none;appearance:none">
+        ${ordOpts.map(([v,l])=>`<option value="${v}" ${ordemDesp===v?"selected":""}>${l}</option>`).join("")}
+      </select>
+    </div>`:"";
   return `<div style="padding-top:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
       <h2 style="margin:0">Despesas</h2>
-      <div style="display:flex;gap:8px">${btnAdd}${btnReset}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${btnAdd}${btnExp}${btnReset}</div>
     </div>
     ${cab}
     ${busca}
     <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px">${pills}</div>
+    ${ordena}
     <div id="despCards">${cards}</div></div>`;
 }
 // busca de despesas: atualização leve (não recria a tela toda a cada tecla, para
 // não perder o foco do teclado no iOS Safari)
 G.buscarDesp=(v)=>{
   buscaDesp=v||"";
-  let vis=filtroDesp==="todos"?state.itens:state.itens.filter(i=>i.natureza===filtroDesp);
-  const termo=chaveNome(buscaDesp);
-  if(termo) vis=vis.filter(i=>chaveNome(i.nome).includes(termo));
   const box=document.getElementById("despCards");
-  if(box) box.innerHTML = vis.length?vis.map(itemCard).join(""):`<div class="card" style="text-align:center;color:var(--mute);font-size:13px;padding:28px">${termo?`Nada encontrado para “${h(buscaDesp)}”.`:"Nenhuma despesa aqui. Use ➕ Adicionar."}</div>`;
+  if(box) box.innerHTML = despCardsHTML();
   const clr=document.getElementById("buscaDespClear");
   if(clr) clr.style.display = buscaDesp?"block":"none";
+};
+// ordenar despesas: também atualização leve (mantém busca e filtro atuais)
+G.ordenarDesp=(v)=>{
+  ordemDesp=v||"natural";
+  const box=document.getElementById("despCards");
+  if(box) box.innerHTML = despCardsHTML();
 };
 function itemCard(it){
   const v=it.natureza==="estimada"?provavel(it):(+it.valor||0);
   const pago=estaPago(it.id);
+  const iniP=+it.inicioIdx||0;
   const sub=`${it.cat} · ${NAT_LABEL[it.natureza]}`
     +(it.natureza==="estimada"?` · ${fmt(+it.min||0)}–${fmt(+it.max||0)}`:"")
     +(it.natureza==="eventual"?` · ${MESES[(new Date().getMonth()+(+it.mesIdx||0))%12]}`:"")
-    +(it.natureza==="parcela"?` · faltam ${it.restam}x`:"");
+    +(it.natureza==="parcela"?` · faltam ${it.restam}x${iniP>0?` · começa ${mesLabelIdx(iniP)}`:""}`:"");
   // ação de pagamento conforme natureza
   const acaoPag = it.natureza==="parcela"
     ? `<button onclick="_g.quitarParcela('${it.id}')" style="background:var(--green);border:none;color:#fff;font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px">✓ paguei esta parcela</button>`
@@ -4453,7 +4509,9 @@ function renderEdicao(id){
   html+=campo("Nome","nome",it.nome);
   if(it.natureza==="estimada") html+=`<div style="display:flex;gap:8px">${campo("Mínimo (R$)","min",it.min,"number")}${campo("Máximo (R$)","max",it.max,"number")}</div>`;
   else html+=campo(it.natureza==="parcela"?"Valor da parcela (R$)":(it.natureza==="ordinaria"?"Valor mensal (R$)":"Valor (R$)"),"valor",it.valor,"number");
-  if(it.natureza==="parcela") html+=campo("Parcelas restantes","restam",it.restam,"number");
+  if(it.natureza==="parcela"){ html+=campo("Parcelas restantes","restam",it.restam,"number");
+    html+=`<label class="fld">Começa a pesar em<select class="inp" onchange="_g.campo('${id}','inicioIdx',this.value,true)">${[0,1,2,3,4,5,6].map(k=>`<option value="${k}" ${(+it.inicioIdx||0)===k?'selected':''}>${k===0?'Este mês ('+mesLabelIdx(0)+')':mesLabelIdx(k)}</option>`).join("")}</select></label>`;
+  }
   if(it.natureza==="eventual") html+=campo("Daqui a quantos meses (0=este)","mesIdx",it.mesIdx||0,"number");
   html+=`<label class="fld">Categoria<select class="inp" onchange="_g.campo('${id}','cat',this.value,false)">${CATEGORIAS.map(c=>`<option ${c===it.cat?'selected':''}>${c}</option>`).join("")}</select></label>`;
   box.innerHTML=`<div>${html}</div><button class="btnG" style="margin-top:12px;width:100%" onclick="_g.editar('${id}')">fechar edição</button>`;
@@ -4475,7 +4533,7 @@ G.setNatItem=(id,nat)=>{
 };
 G.campo=(id,key,val,num)=>{
   let v;
-  if(num){ v = (key==="restam"||key==="mesIdx") ? parseInt10(val) : parseMoeda(val); }
+  if(num){ v = (key==="restam"||key==="mesIdx"||key==="inicioIdx") ? parseInt10(val) : parseMoeda(val); }
   else v = val;
   const patch={[key]:v};
   if(key==="valor"||key==="restam"){
@@ -4780,6 +4838,139 @@ G.exportarBackup=()=>{
     status("Backup exportado ✓",false);
   }catch(e){ alert("Não consegui exportar: "+(e.message||e)); }
 };
+// ===== EXPORTAÇÃO (CSV / PDF) de despesas e receitas ========================
+function escCSV(v){ const s=String(v==null?"":v); return /[",;\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+function numBR(n){ return (Math.round((+n||0)*100)/100).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// monta as linhas detalhadas (usadas tanto no CSV quanto no PDF)
+function linhasDespesas(){
+  return (state.itens||[]).map(it=>{
+    const base=it.natureza==="estimada"?provavel(it):(+it.valor||0);
+    return {
+      tipo:"Despesa",
+      nome:it.nome||"",
+      categoria:it.cat||catGuess((it.nome||"").toLowerCase())||"",
+      natureza:(NAT_LABEL[it.natureza]||it.natureza||"").split(" (")[0],
+      valorMes:valorMes(it),
+      valorCheio:base,
+      parcela: it.natureza==="parcela" && it.restam ? `restam ${it.restam}` : "",
+      total: it.natureza==="parcela" && it.total ? it.total : "",
+      mes: it.natureza==="parcela" ? "" : (it.mesIdx!=null ? mesLabelIdx(it.mesIdx) : (state.mesRef||"")),
+      data: it.data||"",
+      pago: estaPago(it.id) ? "sim" : "não",
+      origem: it.origem||"manual"
+    };
+  });
+}
+function linhasReceitas(){
+  return (state.receitas||[]).map(r=>({
+    tipo:"Receita",
+    nome:r.nome||"",
+    categoria:r.cat||"",
+    natureza: r.recorrente ? "Recorrente" : "Extra (mês específico)",
+    valorMes:(+r.valor||0),
+    valorCheio:(+r.valor||0),
+    parcela:"", total:"",
+    mes: r.recorrente ? "todo mês" : mesLabelIdx(r.mesIdx),
+    data: r.criadoEm ? String(r.criadoEm).slice(0,10) : "",
+    pago:"", origem:r._emprestimo?"empréstimo":(r.origem||"manual")
+  }));
+}
+G.exportarCSV=(escopo)=>{      // escopo: 'despesas' | 'receitas' | 'tudo'
+  try{
+    let linhas=[];
+    if(escopo==="despesas") linhas=linhasDespesas();
+    else if(escopo==="receitas") linhas=linhasReceitas();
+    else linhas=[...linhasDespesas(), ...linhasReceitas()];
+    if(!linhas.length){ alert("Nada para exportar neste escopo."); return; }
+    const cols=[["tipo","Tipo"],["nome","Nome"],["categoria","Categoria"],["natureza","Natureza"],
+      ["valorMes","Valor no mês (R$)"],["valorCheio","Valor cheio (R$)"],["parcela","Parcela"],
+      ["total","Total parcelado (R$)"],["mes","Mês"],["data","Data"],["pago","Pago"],["origem","Origem"]];
+    const cab=cols.map(c=>escCSV(c[1])).join(";");
+    const corpo=linhas.map(l=>cols.map(([k])=>{
+      let v=l[k]; if((k==="valorMes"||k==="valorCheio"||k==="total") && v!=="" && v!=null) v=numBR(v);
+      return escCSV(v);
+    }).join(";")).join("\n");
+    const csv="\ufeff"+cab+"\n"+corpo;   // BOM p/ Excel abrir acentos certo
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const d=new Date(); const tag=escopo==="tudo"?"completo":escopo;
+    const nome=`guava-${tag}-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}.csv`;
+    const a=document.createElement("a"); a.href=url; a.download=nome; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },500);
+    status("CSV exportado ✓",false);
+  }catch(e){ alert("Não consegui exportar o CSV: "+(e.message||e)); }
+};
+// PDF sem biblioteca externa: gera um HTML limpo e abre o diálogo de impressão do
+// navegador (no iPhone: Compartilhar → Imprimir → "Salvar em PDF"). Leve e fiel.
+G.exportarPDF=(escopo)=>{
+  try{
+    const desp=(escopo==="receitas")?[]:linhasDespesas();
+    const rec=(escopo==="despesas")?[]:linhasReceitas();
+    if(!desp.length && !rec.length){ alert("Nada para exportar neste escopo."); return; }
+    const totDesp=desp.reduce((a,l)=>a+(+l.valorMes||0),0);
+    const totRec=rec.reduce((a,l)=>a+(+l.valorMes||0),0);
+    const d=new Date();
+    const dataStr=`${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+    const tabela=(titulo,linhas,tot,corTot)=>{
+      if(!linhas.length) return "";
+      const rows=linhas.map(l=>`<tr>
+        <td>${h(l.nome)}</td><td>${h(l.categoria)}</td><td>${h(l.natureza)}</td>
+        <td class="r">${numBR(l.valorMes)}</td><td>${h(l.parcela||l.mes||"")}</td>
+        <td>${h(l.data||"")}</td>${escopo!=="receitas"&&titulo.includes("Despesas")?`<td>${h(l.pago)}</td>`:""}</tr>`).join("");
+      const extraCol = (titulo.includes("Despesas")) ? "<th>Pago</th>" : "";
+      return `<h2>${titulo} <span class="cnt">(${linhas.length})</span></h2>
+      <table><thead><tr><th>Nome</th><th>Categoria</th><th>Natureza</th><th class="r">Valor/mês</th><th>Parcela/Mês</th><th>Data</th>${extraCol}</tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="3">Total</td><td class="r" style="color:${corTot}">R$ ${numBR(tot)}</td><td colspan="${extraCol?3:2}"></td></tr></tfoot></table>`;
+    };
+    const html=`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>Guava — Relatório</title>
+      <style>
+        *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1b2b24;margin:24px;font-size:12px}
+        .head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #1F7A54;padding-bottom:10px;margin-bottom:16px}
+        .brand{font-size:22px;font-weight:800;color:#1F7A54} .sub{color:#6b7d75;font-size:11px}
+        h2{font-size:14px;margin:18px 0 6px;color:#1F7A54} .cnt{color:#9aa8a1;font-weight:400;font-size:11px}
+        table{width:100%;border-collapse:collapse;margin-bottom:8px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #e7ece9}
+        th{background:#eef6f1;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;color:#3d5147}
+        td.r,th.r{text-align:right} tfoot td{font-weight:700;border-top:2px solid #1F7A54;border-bottom:none}
+        .resumo{display:flex;gap:16px;margin-bottom:8px} .card{flex:1;background:#f3f9f5;border:1px solid #d9ebe1;border-radius:10px;padding:10px 14px}
+        .card b{display:block;font-size:17px;color:#1F7A54} .card span{font-size:10.5px;color:#6b7d75}
+        @media print{body{margin:10mm}}
+      </style></head><body>
+      <div class="head"><div><div class="brand">🍐 Guava</div><div class="sub">Relatório financeiro — Fernando</div></div>
+        <div class="sub" style="text-align:right">Gerado em ${dataStr}<br>Mês de referência: ${state.mesRef||"—"}</div></div>
+      <div class="resumo">
+        ${desp.length?`<div class="card"><span>Total despesas (mês)</span><b>R$ ${numBR(totDesp)}</b><span>${desp.length} lançamento(s)</span></div>`:""}
+        ${rec.length?`<div class="card"><span>Total receitas extras (mês)</span><b>R$ ${numBR(totRec)}</b><span>${rec.length} lançamento(s)</span></div>`:""}
+      </div>
+      ${tabela("Despesas",desp,totDesp,"#B4536B")}
+      ${tabela("Receitas",rec,totRec,"#1F7A54")}
+      <div class="sub" style="margin-top:20px;text-align:center">Gerado pelo Guava · copiloto financeiro</div>
+      <script>window.onload=function(){setTimeout(function(){window.print();},350);};<\/script>
+      </body></html>`;
+    const w=window.open("","_blank");
+    if(!w){ alert("Permita pop-ups para gerar o PDF, ou use a exportação em CSV."); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    status("Abrindo PDF para impressão…",false);
+  }catch(e){ alert("Não consegui gerar o PDF: "+(e.message||e)); }
+};
+// menu de exportação (chamado pelo botão na aba Despesas)
+G.abrirExportar=()=>{
+  const nd=(state.itens||[]).length, nr=(state.receitas||[]).length;
+  if(!nd && !nr){ alert("Não há despesas nem receitas para exportar."); return; }
+  const m={de:"ia", html:`<b>Exportar dados</b><div style="font-size:11.5px;color:var(--mute);margin:2px 0 10px">Escolha o que e em qual formato exportar.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+      <button onclick="_g.exportarCSV('despesas')" ${nd?"":"disabled"} style="${btnExpCSS(nd)}">📄 Despesas · CSV</button>
+      <button onclick="_g.exportarPDF('despesas')" ${nd?"":"disabled"} style="${btnExpCSS(nd)}">📕 Despesas · PDF</button>
+      <button onclick="_g.exportarCSV('receitas')" ${nr?"":"disabled"} style="${btnExpCSS(nr)}">📄 Receitas · CSV</button>
+      <button onclick="_g.exportarPDF('receitas')" ${nr?"":"disabled"} style="${btnExpCSS(nr)}">📕 Receitas · PDF</button>
+      <button onclick="_g.exportarCSV('tudo')" style="${btnExpCSS(1)};grid-column:1/2">📊 Tudo · CSV</button>
+      <button onclick="_g.exportarPDF('tudo')" style="${btnExpCSS(1)};grid-column:2/3">📗 Tudo · PDF</button>
+    </div>`};
+  chatMsgs.push(m); setTab("chat"); setTimeout(()=>appendChatBubble(m),60);
+};
+function btnExpCSS(on){ return `background:${on?"#fff":"#f2f2f2"};border:1.5px solid ${on?"var(--line)":"#e5e5e5"};color:${on?"var(--ink)":"#bbb"};font-weight:700;font-size:12px;padding:11px 8px;border-radius:10px;${on?"":"pointer-events:none"}`; }
 G.importarBackup=(ev)=>{
   const f=ev.target.files&&ev.target.files[0]; if(ev.target) ev.target.value=""; if(!f) return;
   const r=new FileReader();
