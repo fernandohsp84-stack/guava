@@ -3026,7 +3026,7 @@ function propostaHTML(){
     </div>
     ${sel.some(x=>!x._receita)?`<div style="background:#F0F6FF;border:1px solid #CFE0F5;border-radius:11px;padding:9px 11px;margin:8px 0 4px">
       <div style="font-size:11.5px;color:#2C5AA0;font-weight:700;margin-bottom:5px">📅 A partir de que mês essas compras pesam?</div>
-      <div style="font-size:10.5px;color:#5b6b82;margin-bottom:7px">Compras no cartão entram na <b>próxima fatura</b>. Confirme o mês em que elas começam a contar no orçamento.</div>
+      <div style="font-size:10.5px;color:#5b6b82;margin-bottom:7px">Compra no cartão (à vista ou parcelada) entra na <b>próxima fatura</b> — só pesa no orçamento quando a fatura vence. Confirme o mês.</div>
       <select id="propInicio" onchange="_g.propInicio(this.value)" style="width:100%;padding:8px 10px;border:1.5px solid #CFE0F5;border-radius:9px;font-size:12.5px;background:#fff;color:#2C5AA0;font-weight:700;-webkit-appearance:none;appearance:none">
         ${[0,1,2,3].map(k=>`<option value="${k}" ${propInicioIdx===k?"selected":""}>${k===0?"Este mês ("+mesLabelIdx(0)+")":k===1?"Próxima fatura ("+mesLabelIdx(1)+")":mesLabelIdx(k)}</option>`).join("")}
       </select>
@@ -3141,7 +3141,13 @@ G.chatIncluirProposta=(forcar)=>{
       // eventual → mesIdx (a menos que já tenha vindo com mês específico da data).
       const itComInicio={...it};
       if(nat==="parcela") itComInicio.inicioIdx=propInicioIdx;
-      else if(nat==="eventual" && !(it.data)) itComInicio.mesIdx=propInicioIdx;
+      // A competência escolhida no seletor 📅 é a intenção EXPLÍCITA do usuário e
+      // vence a data da transação: uma compra à vista no cartão em ago cai na
+      // fatura de set. Só respeitamos a data-derivada quando o usuário deixou
+      // "Este mês" (propInicioIdx=0) E o item trouxe uma data própria.
+      else if(nat==="eventual"){
+        if((+propInicioIdx||0)>0 || !it.data) itComInicio.mesIdx=propInicioIdx;
+      }
       const v = nat==="estimada"?provavel(itComInicio):(+itComInicio.valor||0);
       const quando = nat==="parcela"
         ? (propInicioIdx>0?` · começa em ${mesLabelIdx(propInicioIdx)}`:"")
@@ -3158,11 +3164,18 @@ G.chatIncluirProposta=(forcar)=>{
   propMsg=null;
   filtroDesp="todos";     // garante que os novos itens apareçam na lista de Despesas
   salvar(); render();      // ATUALIZA o app por trás do chat (Despesas, Projeção e gráfico)
-  // efeito no mês, com tom acolhedor (gap ou sobra geram sentimento — acolher, não alarmar)
-  const pAtu=projecao(), sb=pAtu[0].sobra;
+  // efeito no MÊS EM QUE OS LANÇAMENTOS PESAM (não sempre o mês atual). Se você
+  // marcou "próxima fatura", o impacto é em setembro — então olhamos a sobra
+  // daquele mês, senão a mensagem fica enganosa (parecia pesar em agosto).
+  const pAtu=projecao();
+  const idxEfeito = Math.max(0, Math.min((pAtu.length-1), (+propInicioIdx||0)));
+  const alvo = pAtu[idxEfeito] || pAtu[0];
+  const sb = alvo.sobra;
+  const mesEfeito = mesLabelIdx(idxEfeito);
+  const ondeTxt = idxEfeito>0 ? ` em <b>${mesEfeito}</b>` : " neste mês";
   const efeito = sb>=0
-    ? `<div style="margin-top:8px;font-size:12.5px;color:#0E7A55">Com isso, seu mês segue no azul: sobra <b>${fmtV(sb)}</b>. 🌿</div>`
-    : `<div style="margin-top:8px;font-size:12.5px;color:#B4536B">Este lançamento deixa o mês <b>${fmtV(-sb)}</b> no vermelho. Sem pânico — posso te mostrar onde dá para ajustar, é só pedir. 🤝</div>`;
+    ? `<div style="margin-top:8px;font-size:12.5px;color:#0E7A55">Com isso,${idxEfeito>0?` ${mesEfeito}`:" seu mês"} segue no azul: sobra <b>${fmtV(sb)}</b>. 🌿</div>`
+    : `<div style="margin-top:8px;font-size:12.5px;color:#B4536B">Este lançamento pesa${ondeTxt}, que fica <b>${fmtV(-sb)}</b> no vermelho. Sem pânico — posso te mostrar onde dá para ajustar, é só pedir. 🤝</div>`;
   const botoes=`<div style="display:flex;gap:8px;margin-top:10px">
     ${nd?`<button onclick="_g.irParaDe('despesas')" style="flex:1;background:var(--emerald);border:none;color:#fff;font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver em Despesas</button>`:''}
     ${(nr||nd)?`<button onclick="_g.irParaDe('proj')" style="flex:1;background:#fff;border:1.5px solid var(--nu);color:var(--nu);font-weight:700;font-size:12.5px;padding:9px;border-radius:9px">Ver na Projeção</button>`:''}
